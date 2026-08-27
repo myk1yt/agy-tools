@@ -54,6 +54,7 @@ const {
   DASHBOARD_SERVER_PORT_FILE,
   DASHBOARD_DEFAULT_PORT
 } = require('./config');
+const { DASHBOARD_PAYLOAD_VERSION } = require('./html-report');
 const osc8 = require('./osc8');
 
 /** net.connect probe cap (loopback connects resolve in ~1ms). */
@@ -150,7 +151,12 @@ function atomicWriteJson(filePath, data) {
  * @returns {object} The written record.
  */
 function writePortFile(port, pid = process.pid, portFile = DASHBOARD_SERVER_PORT_FILE) {
-  const record = { port, pid, startedAt: new Date().toISOString() };
+  const record = {
+    port,
+    pid,
+    startedAt: new Date().toISOString(),
+    payloadVersion: DASHBOARD_PAYLOAD_VERSION
+  };
   atomicWriteJson(portFile, record);
   return record;
 }
@@ -253,8 +259,17 @@ async function ensureServerRunning(opts = {}) {
   const record = readPortFile(portFile);
   const recordedPort = record && Number.isInteger(record.port) ? record.port : null;
 
-  // 1. Previously started server: probe its recorded port.
-  if (recordedPort !== null && (await probePort(recordedPort))) {
+  // REQ-240: a recorded server whose payloadVersion is older than the current
+  // DASHBOARD_PAYLOAD_VERSION is stale (running pre-upgrade code that pushes
+  // old-schema SSE payloads). Skip the probe-hit fast path so a fresh server
+  // is spawned; it fails to bind the same port and auto-increments (serve.js
+  // EADDRINUSE retry), then rewrites the port file with the new version.
+  const recordedVersion = record && Number.isInteger(record.payloadVersion) ? record.payloadVersion : null;
+  const serverStale = recordedPort !== null &&
+    (recordedVersion === null || recordedVersion < DASHBOARD_PAYLOAD_VERSION);
+
+  // 1. Previously started server: probe its recorded port (fresh only).
+  if (recordedPort !== null && !serverStale && (await probePort(recordedPort))) {
     return { url: httpUrl(recordedPort), started: false };
   }
 
@@ -270,7 +285,9 @@ async function ensureServerRunning(opts = {}) {
   }
 
   // 3. Running server without a port file (deleted/cleared): probe default.
-  if (recordedPort !== preferredPort && (await probePort(preferredPort))) {
+  //    A stale recorded server also falls through here; skip the default-port
+  //    fast path so the stale server is NOT linked and a fresh one spawns.
+  if (recordedPort !== preferredPort && !serverStale && (await probePort(preferredPort))) {
     return { url: httpUrl(preferredPort), started: false };
   }
 

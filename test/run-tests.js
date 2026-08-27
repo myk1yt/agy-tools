@@ -1540,7 +1540,7 @@ async function runAllTests() {
       assert(dateGroupPos >= 0 && modelGroupPos > dateGroupPos, 'date filter group must precede model filter group');
     });
 
-    await test('renderDashboardHtml should order date filter buttons today/yesterday/7d/30d/custom with 30d default active', () => {
+    await test('renderDashboardHtml should order date filter buttons today/yesterday/7d/30d/custom with today default active (REQ-241)', () => {
       const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
       const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
 
@@ -1553,10 +1553,80 @@ async function runAllTests() {
         prevPos = pos;
       }
 
-      // Default active remains 30d
-      assert(/data-range="30d"[^>]*class="filter-btn active"/.test(html) ||
-             /class="filter-btn active"[^>]*data-range="30d"/.test(html),
-        '30d button must be the default active button');
+      // Default active is today (REQ-241); 30d must NOT be active
+      assert(/data-range="today"[^>]*class="filter-btn active"/.test(html) ||
+             /class="filter-btn active"[^>]*data-range="today"/.test(html),
+        'today button must be the default active button');
+      assert(!(/data-range="30d"[^>]*class="filter-btn active"/.test(html) ||
+               /class="filter-btn active"[^>]*data-range="30d"/.test(html)),
+        '30d button must not be active by default');
+
+      // filterState default range is today
+      assert(html.includes("range: 'today'"), "filterState default range must be 'today'");
+    });
+
+    await test('renderDashboardHtml should guard against stale (pre-v3) SSE/poll payloads (REQ-244)', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      // Version guard helper exists and checks version + dailyModels
+      assert(html.includes('function isFreshPayload('), 'isFreshPayload guard missing');
+      assert(/isFreshPayload\(p\)\s*\{\s*return/.test(html), 'isFreshPayload must be a predicate');
+      assert(html.includes('p.version >= 3'), 'version check missing in guard');
+      assert(html.includes('p.dailyModels'), 'dailyModels check missing in guard');
+
+      // SSE handler ignores stale payloads before render/overwrite
+      const sseFn = html.match(/es\.onmessage = function \(ev\) \{[\s\S]*?\n      \};/);
+      assert(sseFn, 'SSE onmessage handler not found');
+      assert(sseFn[0].includes('isFreshPayload(p)'), 'SSE handler must check isFreshPayload');
+      assert(sseFn[0].indexOf('isFreshPayload(p)') < sseFn[0].indexOf('render(p)'),
+        'stale check must run before render(p)');
+
+      // Polling onload ignores stale payloads before render
+      const pollFn = html.match(/sc\.onload = function \(\) \{[\s\S]*?\n    \};/);
+      assert(pollFn, 'pollOnce onload handler not found');
+      assert(pollFn[0].includes('isFreshPayload(window.__AGY_DASH__)'),
+        'polling onload must check isFreshPayload before render');
+    });
+
+    await test('renderSvg should fall back to single-series bars when dailyModels is missing (REQ-244)', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      // Fallback path: single-series bar from d.totalTokens with default accent
+      assert(html.includes('st.fallback'), 'renderSvg fallback flag missing');
+      assert(html.includes('daily[i].totalTokens'), 'renderSvg must fall back to d.totalTokens');
+      assert(html.includes("class=\"bar\">"), 'fallback bar must use default accent .bar class');
+      // Baseline-only path still exists for genuinely empty days
+      assert(html.includes('height="1" class="bar"'), 'baseline rect for empty days missing');
+    });
+
+    await test('getFilteredData should degrade gracefully when dailyModels is missing (REQ-244)', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      // hasDailyModels detection + fallback to p.models and p.daily rows as-is
+      assert(html.includes('hasDailyModels'), 'dailyModels presence detection missing');
+      assert(html.includes('filteredDaily.push(dd)'), 'daily fallback to p.daily rows missing');
+      assert(html.includes('srcModels[fmi].model'), 'models fallback to p.models missing');
+    });
+
+    await test('renderTable should render per-model sub-rows from dailyModels (REQ-243)', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      // renderTable consumes dailyModels and renders sub-rows
+      assert(/function renderTable\(daily, dailyModels\)/.test(html),
+        'renderTable must accept (daily, dailyModels)');
+      assert(html.includes('class="subrow"'), 'subrow row class missing');
+      assert(html.includes('\\u21b3'), 'subrow model-name arrow prefix missing');
+      assert(html.includes('subList.sort'), 'sub-rows must be sorted by cost desc');
+      assert(html.includes('filterState.models.has(mn)'), 'sub-rows must respect the model filter');
+
+      // Sub-row CSS with RTL support
+      assert(html.includes('.subrow td{color:var(--dim);font-size:11px}'), 'subrow CSS missing');
+      assert(html.includes('[dir=rtl] .subrow td:first-child{padding-left:0;padding-right:20px}'),
+        'RTL subrow padding missing');
     });
 
     await test('renderDashboardHtml should include stacked per-model chart JS with legend and custom 5th card logic', () => {

@@ -53,6 +53,15 @@
 - [ ] [REQ-236] Stacked bar chart: each day's bar segmented by model contribution (colors per model, legend shown).
 - [ ] [REQ-237] All tests still pass; suite 15 updated for new layout/filter behavior.
 
+### v3.2 Follow-up: Real-browser Bug Fixes + Per-Model Daily Detail (user feedback 260827 #2)
+
+- [ ] [REQ-240] BUG: Token Usage Trend chart must NOT go blank after initial render (SSE/poll updates). Root cause must be diagnosed (suspected: stale background server pushes v2 payloads without dailyModels; client must tolerate/ignore stale payloads and fall back to polling fresh dashboard-data.js).
+- [ ] [REQ-241] Date filter default must be 오늘 (Today), not 30d.
+- [ ] [REQ-242] Clicking 오늘/어제/최근7일 must show the filtered Models Usage & Cost table AND Daily Detail table for that range (currently shows nothing in real browser).
+- [ ] [REQ-243] Daily Detail table gains per-model sub-rows: each date row expands to per-model rows (models used that day), respecting the model filter.
+- [ ] [REQ-244] Client must gracefully handle payloads lacking dailyModels (version < 3): chart falls back to single-series bars; SSE stale payloads are ignored in favor of fresh polling data.
+- [ ] [REQ-245] All tests pass; suite 15 updated for new behavior (default=today, per-model daily rows, stale-payload tolerance).
+
 ### Hard Constraints (unchanged from v2)
 
 - Zero new npm dependencies (Node core only).
