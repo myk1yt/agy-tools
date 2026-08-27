@@ -1,6 +1,6 @@
 /**
  * @fileoverview Zero-dependency test runner and comprehensive test suite
- * for Antigravity Token & Cost Tracker.
+ * for Antigravity Token & Cost Tracker and agy-tools suite.
  */
 
 const fs = require('fs');
@@ -54,7 +54,7 @@ function describe(suiteName, fn) {
 async function runAllTests() {
   const startTime = Date.now();
   console.log('\x1b[1m\x1b[35m=======================================================');
-  console.log('   Antigravity Token & Cost Tracker Test Suite');
+  console.log('   Antigravity CLI Developer Toolkit (agy-tools) Test Suite');
   console.log('=======================================================\x1b[0m');
 
   // --- Suite 1: Tokenizer Unit Tests ---
@@ -525,9 +525,10 @@ async function runAllTests() {
   await describe('10. Toolkit Subcommand & Extensibility Unit Tests', async () => {
     await test('Should correctly verify package.json bin registrations', () => {
       const pkgJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-      assert.strictEqual(pkgJson.bin['agy-tokens'], './bin/agy-tokens.js');
+      assert.strictEqual(pkgJson.name, 'agy-tools');
       assert.strictEqual(pkgJson.bin['agy-tools'], './bin/agy-tools.js');
-      assert.strictEqual(pkgJson.bin['antigravity-tools'], './bin/agy-tools.js');
+      assert.strictEqual(pkgJson.bin['agy-dashboard'], './bin/agy-tokens.js');
+      assert.strictEqual(pkgJson.bin['agy-tokens'], './bin/agy-tokens.js');
     });
 
     await test('Should have valid executable entry files', () => {

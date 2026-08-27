@@ -1,4 +1,4 @@
-# ⚡ Antigravity Token & Cost Tracker (`agy-tokens`)
+# ⚡ Antigravity CLI Developer Toolkit (`agy-tools`)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20(Pure%20Node.js)-brightgreen.svg)](#zero-dependency-architecture)
@@ -6,7 +6,7 @@
 [![i18n Supported](https://img.shields.io/badge/i18n-EN%20%7C%20KO%20%7C%20JA%20%7C%20ZH-orange.svg)](#internationalization-i18n)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#installation)
 
-**Antigravity Token & Cost Tracker** is a zero-dependency CLI utility and lifecycle hook handler designed to provide real-time token tracking, prompt cache hit rate analytics, and exact API cost breakdowns for **Antigravity CLI** and modern LLM workflows (Google Gemini 3.7 Flash / Pro, Anthropic Claude 3.7 Sonnet).
+**Antigravity Developer Toolkit (`agy-tools`)** is a zero-dependency CLI suite and lifecycle hook runner for **Antigravity CLI**. It features the **Token & Cost Dashboard (`dashboard`)**, providing real-time token tracking, prompt cache hit rate analytics, and exact API cost breakdowns across Gemini 3.7 Flash/Pro and Claude 3.7 Sonnet workflows.
 
 ---
 
@@ -15,10 +15,10 @@
 - ⚡ **Zero External Dependencies**: Built 100% on native Node.js core modules (`fs`, `path`, `readline`, `os`, `crypto`, `util`). No `node_modules` required.
 - 🎯 **High-Precision Subword BPE Tokenizer**: Accurately tokenizes and estimates consumption across programming languages (Dart, Python, JavaScript/TypeScript, Rust, Go, C++, SQL) and human languages (English, Korean, Japanese, Chinese).
 - 🚀 **Sub-10ms Incremental Cache Engine**: Uses atomic JSON cache (`~/.gemini/token_tracker_cache.json`) with file `mtime` change detection to parse hundreds of conversation transcripts in milliseconds.
-- 📊 **Rich ANSI Terminal UI & Summary Cards**: Visual status cards, formatted daily breakdown tables with cache hit percentages, and turn-by-turn session inspection.
+- 📊 **Rich ANSI Terminal Dashboard & Summary Cards**: Visual status cards, formatted daily breakdown tables with cache hit percentages, and turn-by-turn session inspection.
 - 🌐 **Full Multi-Language (i18n) Support**: Native auto-locale detection with manual `--lang` override supporting English (`en`), Korean (`ko`), Japanese (`ja`), and Chinese (`zh`).
 - 💱 **Multi-Currency Converter**: Real-time conversion to `USD ($)`, `KRW (₩)`, `JPY (¥)`, `EUR (€)`, and `GBP (£)`.
-- 🪝 **Antigravity Lifecycle Hook Integration**: Provides lightweight 1-line real-time status badges for Antigravity `PostInvocation` hooks and the `/usage` slash command.
+- 🪝 **Antigravity Lifecycle Hook Integration**: Lightweight 1-line real-time status badges for Antigravity `PostInvocation` hooks and `/usage` slash command.
 - 🔒 **100% Privacy Preserving**: Zero network telemetry. All parsing and aggregation executes strictly on your local machine.
 
 ---
@@ -27,7 +27,7 @@
 
 ```
                            ┌───────────────────────────────┐
-                           │   Antigravity CLI Session    │
+                           │   Antigravity CLI Session     │
                            │   (~/.gemini/antigravity-cli) │
                            └───────────────┬───────────────┘
                                            │
@@ -71,8 +71,8 @@
 ### Option 1: Global NPM Link (Recommended)
 
 ```bash
-git clone https://github.com/k1yt/Antigravity-cli.git
-cd Antigravity-cli
+git clone https://github.com/myk1yt/agy-tools.git
+cd agy-tools
 npm link
 ```
 
@@ -91,17 +91,19 @@ chmod +x scripts/install.sh
 
 ---
 
-## 🚀 CLI Usage & Examples
+## 🚀 CLI Commands & Usage
 
-```bash
-agy-tokens [options]
-```
+All commands can be invoked using `agy-tools`, `agy-dashboard`, or `agy-tokens`.
 
 ### 1. Daily Usage Summary (Default)
 ```bash
+agy-tools
+# or:
+agy-tools dashboard
+# or:
+agy-dashboard
+# or:
 agy-tokens
-# or explicitly:
-agy-tokens --today
 ```
 
 **Sample Output:**
@@ -127,10 +129,10 @@ agy-tokens --today
 ### 2. 7-Day & 30-Day Breakdown Table
 ```bash
 # 7-day breakdown in Korean Won (KRW)
-agy-tokens --7d --currency krw
+agy-tools dashboard --7d --currency krw
 
 # 30-day breakdown in US Dollars
-agy-tokens --30d --currency usd
+agy-tools dashboard --30d --currency usd
 ```
 
 **Sample Table:**
@@ -148,33 +150,33 @@ agy-tokens --30d --currency usd
 
 ### 3. Custom Date Range Aggregation
 ```bash
-agy-tokens --range 2026-08-01..2026-08-27 --currency eur
+agy-tools dashboard --range 2026-08-01..2026-08-27 --currency eur
 ```
 
 ### 4. Turn-by-Turn Session Drilldown
 ```bash
 # Inspect the most recent active session
-agy-tokens --session
+agy-tools dashboard --session
 
 # Inspect a specific session ID
-agy-tokens --session 0048f579
+agy-tools dashboard --session 0048f579
 ```
 
 ### 5. Multi-Language CLI Output
 ```bash
-agy-tokens --7d --lang ko
-agy-tokens --today --lang ja
-agy-tokens --30d --lang zh
+agy-tools dashboard --7d --lang ko
+agy-tools dashboard --today --lang ja
+agy-tools dashboard --30d --lang zh
 ```
 
 ### 6. Programmatic JSON Output
 ```bash
-agy-tokens --today --json
+agy-tools dashboard --today --json
 ```
 
 ### 7. Real-Time Hook Badge (1-Line)
 ```bash
-agy-tokens --hook
+agy-tools dashboard --hook
 # Output: ⚡ [Antigravity] Turn: 1.8k ($0.0003) | Today: 64.2k ($0.0096) | Cache: 74%
 ```
 
@@ -228,8 +230,8 @@ To automatically display a real-time token and cost badge after every turn in An
   "hooks": {
     "PostInvocation": {
       "enabled": true,
-      "command": "agy-tokens",
-      "args": ["--hook"]
+      "command": "agy-tools",
+      "args": ["dashboard", "--hook"]
     }
   }
 }

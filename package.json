@@ -1,25 +1,28 @@
 {
-  "name": "antigravity-tokens",
+  "name": "agy-tools",
   "version": "1.0.0",
-  "description": "Zero-dependency Token & Cost Tracker and Developer Toolkit for Antigravity CLI and Gemini/Claude LLM workflows",
+  "description": "Zero-dependency Developer Toolkit & Token/Cost Dashboard for Antigravity CLI and Gemini/Claude LLM workflows",
   "main": "src/index.js",
   "bin": {
-    "agy-tokens": "./bin/agy-tokens.js",
     "agy-tools": "./bin/agy-tools.js",
+    "agy-dashboard": "./bin/agy-tokens.js",
+    "agy-tokens": "./bin/agy-tokens.js",
     "antigravity-tools": "./bin/agy-tools.js"
   },
   "scripts": {
-    "start": "node bin/agy-tokens.js",
-    "tools": "node bin/agy-tools.js",
+    "start": "node bin/agy-tools.js",
+    "dashboard": "node bin/agy-tokens.js",
     "test": "node test/run-tests.js"
   },
   "keywords": [
     "antigravity",
+    "agy-tools",
+    "agy-dashboard",
     "gemini",
     "claude",
     "token-tracker",
     "cost-tracker",
-    "llm-tokens",
+    "dashboard",
     "cli",
     "developer-tools",
     "zero-dependency",
@@ -32,7 +35,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/k1yt/Antigravity-cli.git"
+    "url": "https://github.com/myk1yt/agy-tools.git"
   },
   "files": [
     "bin",
