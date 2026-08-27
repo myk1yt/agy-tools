@@ -268,6 +268,16 @@ async function runAllTests() {
       assert(pricing.displayName.includes('Deepseek Chat General'));
     });
 
+    await test('Should resolve suffixed model name via settings-fallback path (REQ-256)', () => {
+      // getBaseModelName must strip effort suffix before pricing lookup,
+      // even when modelName is empty and settings provides the fallback.
+      const baseFromSettings = config.getBaseModelName(config.getActiveModelFromSettings());
+      assert(!baseFromSettings.includes('('), `Settings fallback must be suffix-stripped, got "${baseFromSettings}"`);
+
+      const pricing = config.getModelPricing('Claude Opus 4.6 (Thinking)');
+      assert.strictEqual(pricing.id, 'claude-3-opus', `Suffixed "Claude Opus 4.6 (Thinking)" must resolve to claude-opus tier, got "${pricing.id}"`);
+    });
+
     await test('Should merge user configuration custom pricing models directly into MODEL_PRICING', () => {
       config.MODEL_PRICING['custom-enterprise-test'] = {
         id: 'custom-enterprise-test',

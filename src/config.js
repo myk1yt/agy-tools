@@ -454,7 +454,7 @@ function getBaseModelName(modelName) {
 function getModelPricing(modelName) {
   loadUserConfig();
 
-  const rawTarget = getBaseModelName(modelName) || getActiveModelFromSettings();
+  const rawTarget = getBaseModelName(modelName || getActiveModelFromSettings());
   const target = (rawTarget || '').toLowerCase().trim();
 
   // 1. Exact key match in MODEL_PRICING
