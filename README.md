@@ -253,6 +253,16 @@ node test/run-tests.js
 
 ---
 
+## 🗺️ Roadmap
+
+- [x] **v1.0.0**: High-precision subword BPE token estimation, incremental caching, ANSI terminal dashboard, multi-currency & i18n support.
+- [ ] **v1.1.0**: Interactive full-screen TUI mode with real-time log tailing and session switching.
+- [ ] **v1.2.0**: Context window utilization heatmaps and long-context cost optimization suggestions.
+- [ ] **v1.3.0**: Multi-workspace quota tracking and automated budget threshold alerts.
+- [ ] **v1.4.0**: Custom LLM provider plugins (OpenAI, DeepSeek, local Ollama endpoints).
+
+---
+
 ## 📄 License
 
-MIT License © 2026 k1yt. See [LICENSE](LICENSE) for details.
+MIT License © 2026 kim,yong-tai. See [LICENSE](LICENSE) for details.

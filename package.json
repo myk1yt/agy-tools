@@ -28,7 +28,7 @@
     "zero-dependency",
     "i18n"
   ],
-  "author": "k1yt",
+  "author": "kim,yong-tai",
   "license": "MIT",
   "engines": {
     "node": ">=16.0.0"
