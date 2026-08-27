@@ -1,7 +1,8 @@
 /**
  * @fileoverview Configuration, dynamic model pricing catalog, currency exchange rates,
  * and system path resolvers for Antigravity Token & Cost Tracker.
- * Supports smart fuzzy heuristic pricing resolution and dynamic user config overrides.
+ * Supports official model catalogs, remote pricing synchronization cache,
+ * smart fuzzy heuristic pricing resolution, and dynamic user config overrides.
  */
 
 const fs = require('fs');
@@ -21,6 +22,8 @@ const CACHE_FILE = path.join(GEMINI_DIR, 'token_tracker_cache.json');
 const USER_CONFIG_FILE = path.join(GEMINI_DIR, 'antigravity_tokens.json');
 const USER_PRICING_FILE = path.join(GEMINI_DIR, 'pricing.json');
 const ALT_PRICING_FILE = path.join(ANTIGRAVITY_DIR, 'pricing.json');
+const REMOTE_PRICING_CACHE_FILE = path.join(GEMINI_DIR, 'antigravity_pricing.json');
+const BUNDLED_PRICING_FILE = path.join(__dirname, '..', 'data', 'pricing.json');
 
 /**
  * Regex patterns for smart fuzzy heuristic pricing tier detection.
@@ -31,12 +34,15 @@ const PRO_PATTERN = /(?:^|[^a-z0-9])(pro|ultra|opus|sonnet|large|max|high)(?:[^a
 const FREE_PATTERN = /(?:^|[^a-z0-9])(free|flat|zero|local|ollama)(?:[^a-z0-9]|$)/i;
 
 /**
- * Model pricing catalog (prices in USD per 1,000,000 tokens).
+ * Baseline model pricing catalog (prices in USD per 1,000,000 tokens).
+ * Covering all Google Gemini, Anthropic Claude, and OpenAI models in Antigravity CLI (/model).
  */
 const MODEL_PRICING = {
   'gemini-3.7-flash': {
     id: 'gemini-3.7-flash',
+    provider: 'google',
     displayName: 'Gemini 3.7 Flash',
+    contextWindow: '1M',
     inputPerMillion: 0.15,
     cachedInputPerMillion: 0.0375,
     outputPerMillion: 0.60,
@@ -49,20 +55,45 @@ const MODEL_PRICING = {
       'gemini-3.7-flash-low'
     ]
   },
-  'gemini-2.5-flash': {
-    id: 'gemini-2.5-flash',
-    displayName: 'Gemini 2.5 Flash',
+  'gemini-3.7-flash-thinking': {
+    id: 'gemini-3.7-flash-thinking',
+    provider: 'google',
+    displayName: 'Gemini 3.7 Flash (Thinking)',
+    contextWindow: '1M',
     inputPerMillion: 0.15,
     cachedInputPerMillion: 0.0375,
     outputPerMillion: 0.60,
-    aliases: ['gemini-2.5-flash', 'gemini 2.5 flash', 'gemini-flash']
+    aliases: [
+      'gemini-3.7-flash-thinking',
+      'gemini 3.7 flash thinking',
+      'gemini-3.7-flash-thinking-exp',
+      'gemini-3.7-thinking',
+      'gemini 3.7 thinking'
+    ]
+  },
+  'gemini-2.5-flash': {
+    id: 'gemini-2.5-flash',
+    provider: 'google',
+    displayName: 'Gemini 2.5 Flash',
+    contextWindow: '1M',
+    inputPerMillion: 0.15,
+    cachedInputPerMillion: 0.0375,
+    outputPerMillion: 0.60,
+    aliases: [
+      'gemini-2.5-flash',
+      'gemini 2.5 flash',
+      'gemini-flash'
+    ]
   },
   'gemini-2.5-pro': {
     id: 'gemini-2.5-pro',
+    provider: 'google',
     displayName: 'Gemini 2.5 Pro',
+    contextWindow: '2M',
     inputPerMillion: 1.25,
     cachedInputPerMillion: 0.3125,
     outputPerMillion: 5.00,
+    notes: '>128k prompt rate: $2.50 / $10.00',
     aliases: [
       'gemini-2.5-pro',
       'gemini 2.5 pro',
@@ -71,23 +102,159 @@ const MODEL_PRICING = {
       'gemini-pro'
     ]
   },
+  'gemini-2.0-flash': {
+    id: 'gemini-2.0-flash',
+    provider: 'google',
+    displayName: 'Gemini 2.0 Flash',
+    contextWindow: '1M',
+    inputPerMillion: 0.10,
+    cachedInputPerMillion: 0.025,
+    outputPerMillion: 0.40,
+    aliases: [
+      'gemini-2.0-flash',
+      'gemini 2.0 flash',
+      'gemini-2-flash'
+    ]
+  },
+  'gemini-2.0-flash-lite': {
+    id: 'gemini-2.0-flash-lite',
+    provider: 'google',
+    displayName: 'Gemini 2.0 Flash Lite',
+    contextWindow: '1M',
+    inputPerMillion: 0.075,
+    cachedInputPerMillion: 0.01875,
+    outputPerMillion: 0.30,
+    aliases: [
+      'gemini-2.0-flash-lite',
+      'gemini 2.0 flash lite',
+      'gemini-2-flash-lite'
+    ]
+  },
   'claude-3.7-sonnet': {
     id: 'claude-3.7-sonnet',
+    provider: 'anthropic',
     displayName: 'Claude 3.7 Sonnet',
+    contextWindow: '200k',
     inputPerMillion: 3.00,
     cachedInputPerMillion: 0.30,
     outputPerMillion: 15.00,
     aliases: [
       'claude-3.7-sonnet',
       'claude 3.7 sonnet',
-      'claude-3-5-sonnet',
+      'claude-3-7-sonnet',
+      'claude-3.7-sonnet-thinking',
+      'claude-3.7-sonnet (thinking)'
+    ]
+  },
+  'claude-3.5-sonnet': {
+    id: 'claude-3.5-sonnet',
+    provider: 'anthropic',
+    displayName: 'Claude 3.5 Sonnet',
+    contextWindow: '200k',
+    inputPerMillion: 3.00,
+    cachedInputPerMillion: 0.30,
+    outputPerMillion: 15.00,
+    aliases: [
+      'claude-3.5-sonnet',
       'claude 3.5 sonnet',
+      'claude-3-5-sonnet',
       'sonnet'
+    ]
+  },
+  'claude-3.5-haiku': {
+    id: 'claude-3.5-haiku',
+    provider: 'anthropic',
+    displayName: 'Claude 3.5 Haiku',
+    contextWindow: '200k',
+    inputPerMillion: 0.80,
+    cachedInputPerMillion: 0.08,
+    outputPerMillion: 4.00,
+    aliases: [
+      'claude-3.5-haiku',
+      'claude 3.5 haiku',
+      'claude-3-5-haiku',
+      'haiku'
+    ]
+  },
+  'claude-3-opus': {
+    id: 'claude-3-opus',
+    provider: 'anthropic',
+    displayName: 'Claude 3 Opus',
+    contextWindow: '200k',
+    inputPerMillion: 15.00,
+    cachedInputPerMillion: 1.50,
+    outputPerMillion: 75.00,
+    aliases: [
+      'claude-3-opus',
+      'claude 3 opus',
+      'claude-3-opus-20240229',
+      'opus'
+    ]
+  },
+  'gpt-4o': {
+    id: 'gpt-4o',
+    provider: 'openai',
+    displayName: 'GPT-4o',
+    contextWindow: '128k',
+    inputPerMillion: 2.50,
+    cachedInputPerMillion: 1.25,
+    outputPerMillion: 10.00,
+    aliases: [
+      'gpt-4o',
+      'gpt 4o',
+      'gpt-4o-2024-11-20',
+      'gpt-4o-latest'
+    ]
+  },
+  'gpt-4o-mini': {
+    id: 'gpt-4o-mini',
+    provider: 'openai',
+    displayName: 'GPT-4o mini',
+    contextWindow: '128k',
+    inputPerMillion: 0.15,
+    cachedInputPerMillion: 0.075,
+    outputPerMillion: 0.60,
+    aliases: [
+      'gpt-4o-mini',
+      'gpt 4o mini',
+      'gpt-4o-mini-2024-07-18'
+    ]
+  },
+  'o3-mini': {
+    id: 'o3-mini',
+    provider: 'openai',
+    displayName: 'o3-mini',
+    contextWindow: '200k',
+    inputPerMillion: 1.10,
+    cachedInputPerMillion: 0.55,
+    outputPerMillion: 4.40,
+    aliases: [
+      'o3-mini',
+      'o3 mini',
+      'o3-mini-high',
+      'o3-mini-medium',
+      'o3-mini-low'
+    ]
+  },
+  'o1': {
+    id: 'o1',
+    provider: 'openai',
+    displayName: 'o1',
+    contextWindow: '200k',
+    inputPerMillion: 15.00,
+    cachedInputPerMillion: 7.50,
+    outputPerMillion: 60.00,
+    aliases: [
+      'o1',
+      'o1-preview',
+      'o1-full'
     ]
   },
   'default': {
     id: 'default',
+    provider: 'google',
     displayName: 'Gemini 3.7 Flash (Default)',
+    contextWindow: '1M',
     inputPerMillion: 0.15,
     cachedInputPerMillion: 0.0375,
     outputPerMillion: 0.60,
@@ -167,7 +334,7 @@ function formatModelDisplayName(name) {
 
 /**
  * Dynamically resolves pricing tier using regex/fuzzy heuristic pattern matching
- * for models not explicitly hardcoded in MODEL_PRICING.
+ * for models not explicitly registered in MODEL_PRICING.
  * @param {string} modelName - Model identifier or display name.
  * @returns {object} Pricing configuration with tier information.
  */
@@ -251,7 +418,7 @@ function getActiveModelFromSettings() {
 
 /**
  * Resolves pricing structure for a given model string or alias.
- * Checks registered MODEL_PRICING (including user overrides) first,
+ * Checks registered MODEL_PRICING (including synced rates and user overrides) first,
  * then falls back to smart fuzzy heuristic resolution.
  * @param {string} [modelName] - Optional model identifier or display name.
  * @returns {object} Pricing configuration for the matched model.
@@ -281,8 +448,57 @@ function getModelPricing(modelName) {
 }
 
 /**
- * Loads user custom overrides from ~/.gemini/antigravity_tokens.json or pricing.json if present.
- * Merges user-defined custom pricing models directly into MODEL_PRICING.
+ * Helper to normalize and merge a dictionary of custom model definitions into MODEL_PRICING.
+ * @param {object} pricingDict - Map of model keys to pricing definitions.
+ * @param {object} [destination] - Optional destination object to record custom pricing.
+ */
+function mergePricingDict(pricingDict, destination = null) {
+  if (!pricingDict || typeof pricingDict !== 'object') return;
+  for (const [key, def] of Object.entries(pricingDict)) {
+    if (!def || typeof def !== 'object') continue;
+    const normalizedKey = key.toLowerCase().trim();
+    const id = def.id || normalizedKey;
+    const displayName = def.displayName || def.name || formatModelDisplayName(id);
+    const inputPerMillion = Number(def.inputPerMillion ?? def.input ?? def.prompt ?? 0);
+    const cachedInputPerMillion = Number(
+      def.cachedInputPerMillion ?? def.cachedInput ?? def.cached ?? (inputPerMillion * 0.25)
+    );
+    const outputPerMillion = Number(def.outputPerMillion ?? def.output ?? def.completion ?? 0);
+    const provider = def.provider || '';
+    const contextWindow = def.contextWindow || '1M';
+    const notes = def.notes || '';
+    const customAliases = Array.isArray(def.aliases)
+      ? def.aliases.map(a => String(a).toLowerCase().trim())
+      : [];
+    const aliases = Array.from(
+      new Set([normalizedKey, id.toLowerCase().trim(), ...customAliases])
+    );
+
+    const modelEntry = {
+      id,
+      displayName,
+      provider,
+      contextWindow,
+      inputPerMillion,
+      cachedInputPerMillion,
+      outputPerMillion,
+      notes,
+      aliases
+    };
+
+    MODEL_PRICING[normalizedKey] = modelEntry;
+    if (destination && typeof destination === 'object') {
+      destination[normalizedKey] = modelEntry;
+    }
+  }
+}
+
+/**
+ * Loads and merges pricing definitions according to priority:
+ * 1. Bundled data/pricing.json (if present)
+ * 2. Synced remote cache ~/.gemini/antigravity_pricing.json (if present)
+ * 3. Local pricing files ~/.gemini/pricing.json and ~/.gemini/antigravity-cli/pricing.json
+ * 4. User config overrides ~/.gemini/antigravity_tokens.json (Highest Priority)
  * @returns {object} Merged configuration object.
  */
 function loadUserConfig() {
@@ -295,44 +511,49 @@ function loadUserConfig() {
     customPricing: {}
   };
 
-  /**
-   * Helper to normalize and merge a dictionary of custom model definitions into MODEL_PRICING.
-   * @param {object} pricingDict - Map of model keys to pricing definitions.
-   */
-  function mergePricingDict(pricingDict) {
-    if (!pricingDict || typeof pricingDict !== 'object') return;
-    for (const [key, def] of Object.entries(pricingDict)) {
-      if (!def || typeof def !== 'object') continue;
-      const normalizedKey = key.toLowerCase().trim();
-      const id = def.id || normalizedKey;
-      const displayName = def.displayName || def.name || formatModelDisplayName(id);
-      const inputPerMillion = Number(def.inputPerMillion ?? def.input ?? def.prompt ?? 0);
-      const cachedInputPerMillion = Number(
-        def.cachedInputPerMillion ?? def.cachedInput ?? def.cached ?? (inputPerMillion * 0.25)
-      );
-      const outputPerMillion = Number(def.outputPerMillion ?? def.output ?? def.completion ?? 0);
-      const customAliases = Array.isArray(def.aliases)
-        ? def.aliases.map(a => String(a).toLowerCase().trim())
-        : [];
-      const aliases = Array.from(
-        new Set([normalizedKey, id.toLowerCase().trim(), ...customAliases])
-      );
+  // 1. Try loading bundled data/pricing.json
+  try {
+    if (fs.existsSync(BUNDLED_PRICING_FILE)) {
+      const raw = fs.readFileSync(BUNDLED_PRICING_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      if (data && typeof data === 'object') {
+        mergePricingDict(data.models || data.pricing || data);
+      }
+    }
+  } catch (_err) {
+    // Ignore bundled read error
+  }
 
-      const modelEntry = {
-        id,
-        displayName,
-        inputPerMillion,
-        cachedInputPerMillion,
-        outputPerMillion,
-        aliases
-      };
+  // 2. Try loading synced remote cache ~/.gemini/antigravity_pricing.json
+  try {
+    if (fs.existsSync(REMOTE_PRICING_CACHE_FILE)) {
+      const raw = fs.readFileSync(REMOTE_PRICING_CACHE_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      if (data && typeof data === 'object') {
+        mergePricingDict(data.models || data.pricing || data);
+      }
+    }
+  } catch (_err) {
+    // Ignore cache read error
+  }
 
-      MODEL_PRICING[normalizedKey] = modelEntry;
-      config.customPricing[normalizedKey] = modelEntry;
+  // 3. Try reading ~/.gemini/pricing.json or ~/.gemini/antigravity-cli/pricing.json
+  const pricingFiles = [USER_PRICING_FILE, ALT_PRICING_FILE];
+  for (const pFile of pricingFiles) {
+    try {
+      if (fs.existsSync(pFile)) {
+        const raw = fs.readFileSync(pFile, 'utf8');
+        const data = JSON.parse(raw);
+        if (data && typeof data === 'object') {
+          mergePricingDict(data.pricing || data.models || data, config.customPricing);
+        }
+      }
+    } catch (_err) {
+      // Ignore invalid pricing file
     }
   }
 
-  // 1. Try reading ~/.gemini/antigravity_tokens.json
+  // 4. Try reading user custom overrides ~/.gemini/antigravity_tokens.json (Highest Priority)
   try {
     if (fs.existsSync(USER_CONFIG_FILE)) {
       const raw = fs.readFileSync(USER_CONFIG_FILE, 'utf8');
@@ -357,45 +578,23 @@ function loadUserConfig() {
         }
       }
       if (user.pricing && typeof user.pricing === 'object') {
-        mergePricingDict(user.pricing);
+        mergePricingDict(user.pricing, config.customPricing);
       }
       if (user.customPricing && typeof user.customPricing === 'object') {
-        mergePricingDict(user.customPricing);
+        mergePricingDict(user.customPricing, config.customPricing);
       }
       if (user.models && typeof user.models === 'object') {
-        mergePricingDict(user.models);
+        mergePricingDict(user.models, config.customPricing);
       }
     }
   } catch (_err) {
     // Ignore invalid user config file
   }
 
-  // 2. Try reading ~/.gemini/pricing.json or ~/.gemini/antigravity-cli/pricing.json
-  const pricingFiles = [USER_PRICING_FILE, ALT_PRICING_FILE];
-  for (const pFile of pricingFiles) {
-    try {
-      if (fs.existsSync(pFile)) {
-        const raw = fs.readFileSync(pFile, 'utf8');
-        const data = JSON.parse(raw);
-        if (data && typeof data === 'object') {
-          if (data.pricing && typeof data.pricing === 'object') {
-            mergePricingDict(data.pricing);
-          } else if (data.models && typeof data.models === 'object') {
-            mergePricingDict(data.models);
-          } else {
-            mergePricingDict(data);
-          }
-        }
-      }
-    } catch (_err) {
-      // Ignore invalid pricing file
-    }
-  }
-
   return config;
 }
 
-// Perform initial user config merge on load
+// Perform initial user config and pricing merge on load
 loadUserConfig();
 
 /**
@@ -451,6 +650,8 @@ module.exports = {
   USER_CONFIG_FILE,
   USER_PRICING_FILE,
   ALT_PRICING_FILE,
+  REMOTE_PRICING_CACHE_FILE,
+  BUNDLED_PRICING_FILE,
   MODEL_PRICING,
   CURRENCIES,
   FLASH_PATTERN,
@@ -460,6 +661,7 @@ module.exports = {
   smartHeuristicPricing,
   getActiveModelFromSettings,
   getModelPricing,
+  mergePricingDict,
   loadUserConfig,
   calculateCostUsd,
   calculateCacheSavingsUsd,

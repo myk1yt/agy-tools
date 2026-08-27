@@ -1,6 +1,7 @@
 /**
  * @fileoverview Main entry point and CLI coordinator for Antigravity Token & Cost Tracker.
- * Integrates log parsing, local caching, date aggregation, i18n, and ANSI terminal rendering.
+ * Integrates log parsing, local caching, date aggregation, remote price synchronization,
+ * i18n, and ANSI terminal rendering.
  */
 
 const path = require('path');
@@ -12,6 +13,7 @@ const cacheManager = require('./cache-manager');
 const aggregator = require('./aggregator');
 const formatter = require('./formatter');
 const hookHandler = require('./hook-handler');
+const priceSyncer = require('./price-syncer');
 
 const pkg = require('../package.json');
 
@@ -38,6 +40,9 @@ function parseArgs(argv) {
     json: false,
     hook: false,
     fresh: false,
+    sync: false,
+    prices: false,
+    autoSync: false,
     noColor: false,
     help: false,
     version: false
@@ -97,6 +102,12 @@ function parseArgs(argv) {
       options.hook = true;
     } else if (arg === '--fresh' || arg === '--no-cache') {
       options.fresh = true;
+    } else if (arg === 'sync-prices' || arg === 'sync' || arg === '--sync' || arg === '--sync-prices') {
+      options.sync = true;
+    } else if (arg === 'prices' || arg === 'models' || arg === '--prices' || arg === '--models') {
+      options.prices = true;
+    } else if (arg === '--auto-sync') {
+      options.autoSync = true;
     } else if (arg === '--no-color') {
       options.noColor = true;
     }
@@ -111,6 +122,8 @@ function parseArgs(argv) {
     !options.session &&
     !options.all &&
     !options.hook &&
+    !options.sync &&
+    !options.prices &&
     !options.help &&
     !options.version
   ) {
@@ -153,7 +166,52 @@ async function runCli(argv = process.argv) {
     return;
   }
 
-  // Hook / 1-line badge mode
+  // Handle Auto-Sync if requested or configured
+  if (options.autoSync) {
+    try {
+      const cached = priceSyncer.loadLocalSyncedPricing();
+      const syncedAt = cached?._meta?.syncedAt ? new Date(cached._meta.syncedAt).getTime() : 0;
+      if (!syncedAt || Date.now() - syncedAt > priceSyncer.MAX_CACHE_AGE_MS) {
+        await priceSyncer.syncPricing({ silent: true });
+      }
+    } catch (_err) {
+      // Auto-sync errors are non-blocking
+    }
+  }
+
+  // 1. Sync Prices Subcommand
+  if (options.sync) {
+    const syncRes = await priceSyncer.syncPricing();
+    if (options.json) {
+      console.log(JSON.stringify(syncRes, null, 2));
+      return;
+    }
+
+    if (syncRes.success) {
+      console.log(`\n  ${formatter.styleText('✔', 'brightGreen')} ${formatter.styleText(i18n.t('syncSuccess', { count: syncRes.modelCount, version: syncRes.version }), 'bold')}`);
+      console.log(`  ${formatter.styleText('↳', 'gray')} ${i18n.t('syncCacheSaved', { path: syncRes.path })}\n`);
+    } else {
+      console.log(`\n  ${formatter.styleText('⚠', 'brightYellow')} ${i18n.t('syncFailed', { error: syncRes.error, fallback: syncRes.source })}`);
+      console.log(`  ${formatter.styleText('↳', 'gray')} ${i18n.t('syncCacheSaved', { path: syncRes.path })}\n`);
+    }
+    return;
+  }
+
+  // 2. Prices / Models Catalog Table Subcommand
+  if (options.prices) {
+    const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
+    if (options.json) {
+      const catalog = priceSyncer.getSyncedPricing();
+      console.log(JSON.stringify(catalog, null, 2));
+      return;
+    }
+
+    const tableOutput = priceSyncer.formatPricingTable(currency, targetLang);
+    console.log('\n' + tableOutput + '\n');
+    return;
+  }
+
+  // 3. Hook / 1-line badge mode
   if (options.hook) {
     const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
     const result = await hookHandler.handlePostInvocation({
@@ -180,7 +238,7 @@ async function runCli(argv = process.argv) {
 
   const sessions = syncResult.sessions;
 
-  // 1. Session drilldown mode
+  // 4. Session drilldown mode
   if (options.session) {
     const sessionDetail = aggregator.getSessionDrilldown(sessions, options.sessionId);
     if (!sessionDetail) {
@@ -209,7 +267,7 @@ async function runCli(argv = process.argv) {
     return;
   }
 
-  // 2. Aggregations (Today, Yesterday, 7d, 30d, Range, All)
+  // 5. Aggregations (Today, Yesterday, 7d, 30d, Range, All)
   let reportData = null;
   let periodTitle = '';
   let dateRange = '';
@@ -298,6 +356,7 @@ module.exports = {
   aggregator,
   formatter,
   hookHandler,
+  priceSyncer,
   parseArgs,
   runCli
 };

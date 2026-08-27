@@ -1,11 +1,13 @@
 /**
  * @fileoverview Zero-dependency test runner and comprehensive test suite
- * for Antigravity Token & Cost Tracker and agy-tools suite.
+ * for Antigravity Token & Cost Tracker, Remote Pricing Synchronization Engine,
+ * and agy-tools developer suite.
  */
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const http = require('http');
 const assert = require('assert');
 
 const config = require('../src/config');
@@ -16,6 +18,7 @@ const cacheManager = require('../src/cache-manager');
 const aggregator = require('../src/aggregator');
 const formatter = require('../src/formatter');
 const hookHandler = require('../src/hook-handler');
+const priceSyncer = require('../src/price-syncer');
 const { parseArgs } = require('../src/index');
 
 /**
@@ -73,7 +76,6 @@ async function runAllTests() {
     await test('Should tokenize Korean (Hangul) text with subword calibration', () => {
       const koText = '안녕하세요 Antigravity 토큰 계산기 테스트입니다.';
       const tokens = tokenizer.estimateTokens(koText);
-      // ~22 chars with Korean syllables -> ~15-25 tokens
       assert(tokens >= 15 && tokens <= 25, `Expected 15-25 tokens, got ${tokens}`);
     });
 
@@ -126,7 +128,7 @@ async function runAllTests() {
     });
   });
 
-  // --- Suite 2: Configuration & Pricing Unit Tests ---
+  // --- Suite 2: Configuration & Dynamic Pricing Unit Tests ---
   await describe('2. Configuration & Dynamic Pricing Unit Tests', async () => {
     await test('Should resolve default pricing for Gemini 3.7 Flash', () => {
       const pricing = config.getModelPricing('Gemini 3.7 Flash (High)');
@@ -144,14 +146,53 @@ async function runAllTests() {
       assert.strictEqual(pricing.outputPerMillion, 15.00);
     });
 
-    await test('Should dynamically resolve Flash Tier via smart fuzzy heuristic for unlisted models (e.g., gemini-4.0-flash-next)', () => {
+    await test('Should resolve pricing for Claude 3.5 Haiku', () => {
+      const pricing = config.getModelPricing('claude-3.5-haiku');
+      assert.strictEqual(pricing.id, 'claude-3.5-haiku');
+      assert.strictEqual(pricing.inputPerMillion, 0.80);
+      assert.strictEqual(pricing.cachedInputPerMillion, 0.08);
+      assert.strictEqual(pricing.outputPerMillion, 4.00);
+    });
+
+    await test('Should resolve pricing for Gemini 2.0 Flash Lite', () => {
+      const pricing = config.getModelPricing('gemini-2.0-flash-lite');
+      assert.strictEqual(pricing.id, 'gemini-2.0-flash-lite');
+      assert.strictEqual(pricing.inputPerMillion, 0.075);
+      assert.strictEqual(pricing.cachedInputPerMillion, 0.01875);
+      assert.strictEqual(pricing.outputPerMillion, 0.30);
+    });
+
+    await test('Should resolve pricing for GPT-4o mini', () => {
+      const pricing = config.getModelPricing('gpt-4o-mini');
+      assert.strictEqual(pricing.id, 'gpt-4o-mini');
+      assert.strictEqual(pricing.inputPerMillion, 0.15);
+      assert.strictEqual(pricing.cachedInputPerMillion, 0.075);
+      assert.strictEqual(pricing.outputPerMillion, 0.60);
+    });
+
+    await test('Should resolve pricing for o3-mini', () => {
+      const pricing = config.getModelPricing('o3-mini');
+      assert.strictEqual(pricing.id, 'o3-mini');
+      assert.strictEqual(pricing.inputPerMillion, 1.10);
+      assert.strictEqual(pricing.cachedInputPerMillion, 0.55);
+      assert.strictEqual(pricing.outputPerMillion, 4.40);
+    });
+
+    await test('Should resolve pricing for o1', () => {
+      const pricing = config.getModelPricing('o1');
+      assert.strictEqual(pricing.id, 'o1');
+      assert.strictEqual(pricing.inputPerMillion, 15.00);
+      assert.strictEqual(pricing.cachedInputPerMillion, 7.50);
+      assert.strictEqual(pricing.outputPerMillion, 60.00);
+    });
+
+    await test('Should dynamically resolve Flash Tier via smart fuzzy heuristic for unlisted models', () => {
       const modelsToTest = [
         'gemini-4.0-flash-next',
-        'gpt-4o-mini',
-        'claude-3.5-haiku',
-        'gemini-2.0-flash-lite',
         'custom-turbo-model',
-        'mistral-small'
+        'mistral-small',
+        'unlisted-lite-model',
+        'unknown-fast-preview'
       ];
 
       for (const m of modelsToTest) {
@@ -163,10 +204,9 @@ async function runAllTests() {
       }
     });
 
-    await test('Should dynamically resolve Pro Tier via smart fuzzy heuristic for unlisted models (e.g., gemini-3.5-pro-preview)', () => {
+    await test('Should dynamically resolve Pro Tier via smart fuzzy heuristic for unlisted models', () => {
       const modelsToTest = [
         'gemini-3.5-pro-preview',
-        'claude-3-opus',
         'gemini-ultra-preview',
         'llama-3-70b-large',
         'qwen-max-latest',
@@ -545,7 +585,6 @@ async function runAllTests() {
       const styled = '\x1b[31mHello\x1b[0m';
       assert.strictEqual(formatter.stripAnsi(styled), 'Hello');
       assert.strictEqual(formatter.getDisplayWidth('Hello'), 5);
-      // '안녕' is 2 full-width chars = width 4
       assert.strictEqual(formatter.getDisplayWidth('안녕'), 4);
     });
 
@@ -645,6 +684,18 @@ async function runAllTests() {
       assert.strictEqual(opts.session, true);
       assert.strictEqual(opts.sessionId, 'abc-123');
     });
+
+    await test('Should parse pricing catalog subcommands and flags', () => {
+      const opts1 = parseArgs(['node', 'bin/agy-tokens.js', 'sync-prices']);
+      assert.strictEqual(opts1.sync, true);
+
+      const opts2 = parseArgs(['node', 'bin/agy-tokens.js', '--prices']);
+      assert.strictEqual(opts2.prices, true);
+
+      const opts3 = parseArgs(['node', 'bin/agy-tokens.js', 'models', '--auto-sync']);
+      assert.strictEqual(opts3.prices, true);
+      assert.strictEqual(opts3.autoSync, true);
+    });
   });
 
   // --- Suite 10: Toolkit Subcommand & Extensibility Unit Tests ---
@@ -660,6 +711,338 @@ async function runAllTests() {
     await test('Should have valid executable entry files', () => {
       assert(fs.existsSync(path.join(__dirname, '..', 'bin', 'agy-tokens.js')));
       assert(fs.existsSync(path.join(__dirname, '..', 'bin', 'agy-tools.js')));
+    });
+  });
+
+  // --- Suite 11: Pricing Catalog Data Integrity & Model Coverage ---
+  await describe('11. Pricing Catalog Data Integrity & Model Coverage', async () => {
+    const pricingFilePath = path.join(__dirname, '..', 'data', 'pricing.json');
+
+    await test('data/pricing.json file must exist and be valid JSON', () => {
+      assert(fs.existsSync(pricingFilePath), 'data/pricing.json must exist');
+      const raw = fs.readFileSync(pricingFilePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      assert(parsed && typeof parsed === 'object');
+      const validation = priceSyncer.validatePricingData(parsed);
+      assert.strictEqual(validation.valid, true, `Validation failed: ${validation.error}`);
+    });
+
+    await test('Should have complete official Google Gemini models and exact rates', () => {
+      const catalog = JSON.parse(fs.readFileSync(pricingFilePath, 'utf8'));
+      const models = catalog.models;
+
+      // Gemini 3.7 Flash
+      assert(models['gemini-3.7-flash']);
+      assert.strictEqual(models['gemini-3.7-flash'].inputPerMillion, 0.15);
+      assert.strictEqual(models['gemini-3.7-flash'].cachedInputPerMillion, 0.0375);
+      assert.strictEqual(models['gemini-3.7-flash'].outputPerMillion, 0.60);
+
+      // Gemini 3.7 Flash Thinking
+      assert(models['gemini-3.7-flash-thinking']);
+      assert.strictEqual(models['gemini-3.7-flash-thinking'].inputPerMillion, 0.15);
+      assert.strictEqual(models['gemini-3.7-flash-thinking'].cachedInputPerMillion, 0.0375);
+      assert.strictEqual(models['gemini-3.7-flash-thinking'].outputPerMillion, 0.60);
+
+      // Gemini 2.5 Flash
+      assert(models['gemini-2.5-flash']);
+      assert.strictEqual(models['gemini-2.5-flash'].inputPerMillion, 0.15);
+      assert.strictEqual(models['gemini-2.5-flash'].cachedInputPerMillion, 0.0375);
+      assert.strictEqual(models['gemini-2.5-flash'].outputPerMillion, 0.60);
+
+      // Gemini 2.5 Pro
+      assert(models['gemini-2.5-pro']);
+      assert.strictEqual(models['gemini-2.5-pro'].inputPerMillion, 1.25);
+      assert.strictEqual(models['gemini-2.5-pro'].cachedInputPerMillion, 0.3125);
+      assert.strictEqual(models['gemini-2.5-pro'].outputPerMillion, 5.00);
+
+      // Gemini 2.0 Flash
+      assert(models['gemini-2.0-flash']);
+      assert.strictEqual(models['gemini-2.0-flash'].inputPerMillion, 0.10);
+      assert.strictEqual(models['gemini-2.0-flash'].cachedInputPerMillion, 0.025);
+      assert.strictEqual(models['gemini-2.0-flash'].outputPerMillion, 0.40);
+
+      // Gemini 2.0 Flash Lite
+      assert(models['gemini-2.0-flash-lite']);
+      assert.strictEqual(models['gemini-2.0-flash-lite'].inputPerMillion, 0.075);
+      assert.strictEqual(models['gemini-2.0-flash-lite'].cachedInputPerMillion, 0.01875);
+      assert.strictEqual(models['gemini-2.0-flash-lite'].outputPerMillion, 0.30);
+    });
+
+    await test('Should have complete official Anthropic Claude models and exact rates', () => {
+      const catalog = JSON.parse(fs.readFileSync(pricingFilePath, 'utf8'));
+      const models = catalog.models;
+
+      // Claude 3.7 Sonnet
+      assert(models['claude-3.7-sonnet']);
+      assert.strictEqual(models['claude-3.7-sonnet'].inputPerMillion, 3.00);
+      assert.strictEqual(models['claude-3.7-sonnet'].cachedInputPerMillion, 0.30);
+      assert.strictEqual(models['claude-3.7-sonnet'].outputPerMillion, 15.00);
+
+      // Claude 3.5 Sonnet
+      assert(models['claude-3.5-sonnet']);
+      assert.strictEqual(models['claude-3.5-sonnet'].inputPerMillion, 3.00);
+      assert.strictEqual(models['claude-3.5-sonnet'].cachedInputPerMillion, 0.30);
+      assert.strictEqual(models['claude-3.5-sonnet'].outputPerMillion, 15.00);
+
+      // Claude 3.5 Haiku
+      assert(models['claude-3.5-haiku']);
+      assert.strictEqual(models['claude-3.5-haiku'].inputPerMillion, 0.80);
+      assert.strictEqual(models['claude-3.5-haiku'].cachedInputPerMillion, 0.08);
+      assert.strictEqual(models['claude-3.5-haiku'].outputPerMillion, 4.00);
+
+      // Claude 3 Opus
+      assert(models['claude-3-opus']);
+      assert.strictEqual(models['claude-3-opus'].inputPerMillion, 15.00);
+      assert.strictEqual(models['claude-3-opus'].cachedInputPerMillion, 1.50);
+      assert.strictEqual(models['claude-3-opus'].outputPerMillion, 75.00);
+    });
+
+    await test('Should have complete official OpenAI models and exact rates', () => {
+      const catalog = JSON.parse(fs.readFileSync(pricingFilePath, 'utf8'));
+      const models = catalog.models;
+
+      // GPT-4o
+      assert(models['gpt-4o']);
+      assert.strictEqual(models['gpt-4o'].inputPerMillion, 2.50);
+      assert.strictEqual(models['gpt-4o'].cachedInputPerMillion, 1.25);
+      assert.strictEqual(models['gpt-4o'].outputPerMillion, 10.00);
+
+      // GPT-4o mini
+      assert(models['gpt-4o-mini']);
+      assert.strictEqual(models['gpt-4o-mini'].inputPerMillion, 0.15);
+      assert.strictEqual(models['gpt-4o-mini'].cachedInputPerMillion, 0.075);
+      assert.strictEqual(models['gpt-4o-mini'].outputPerMillion, 0.60);
+
+      // o3-mini
+      assert(models['o3-mini']);
+      assert.strictEqual(models['o3-mini'].inputPerMillion, 1.10);
+      assert.strictEqual(models['o3-mini'].cachedInputPerMillion, 0.55);
+      assert.strictEqual(models['o3-mini'].outputPerMillion, 4.40);
+
+      // o1
+      assert(models['o1']);
+      assert.strictEqual(models['o1'].inputPerMillion, 15.00);
+      assert.strictEqual(models['o1'].cachedInputPerMillion, 7.50);
+      assert.strictEqual(models['o1'].outputPerMillion, 60.00);
+    });
+
+    await test('Should contain proper catalog metadata and source URLs', () => {
+      const catalog = JSON.parse(fs.readFileSync(pricingFilePath, 'utf8'));
+      assert.strictEqual(typeof catalog.version, 'string');
+      assert.strictEqual(typeof catalog.lastUpdated, 'string');
+      assert(catalog.sources.google.includes('ai.google.dev'));
+      assert(catalog.sources.anthropic.includes('anthropic.com'));
+      assert(catalog.sources.openai.includes('openai.com'));
+    });
+  });
+
+  // --- Suite 12: Price Syncer Unit Tests (Download, Validation & Fallback) ---
+  await describe('12. Price Syncer Unit Tests (Download, Validation & Fallback)', async () => {
+    await test('validatePricingData should validate correct schema and reject corrupt payloads', () => {
+      const validPayload = {
+        version: '1.0.0',
+        models: {
+          'test-model': {
+            id: 'test-model',
+            inputPerMillion: 1.0,
+            cachedInputPerMillion: 0.25,
+            outputPerMillion: 3.0
+          }
+        }
+      };
+      assert.strictEqual(priceSyncer.validatePricingData(validPayload).valid, true);
+
+      assert.strictEqual(priceSyncer.validatePricingData(null).valid, false);
+      assert.strictEqual(priceSyncer.validatePricingData({}).valid, false);
+      assert.strictEqual(priceSyncer.validatePricingData({ models: {} }).valid, false);
+      assert.strictEqual(priceSyncer.validatePricingData({ models: { 'bad': { inputPerMillion: -1 } } }).valid, false);
+      assert.strictEqual(priceSyncer.validatePricingData({ models: { 'bad': { inputPerMillion: 'invalid' } } }).valid, false);
+    });
+
+    await test('loadBundledPricing should load and validate bundled data/pricing.json', () => {
+      const bundled = priceSyncer.loadBundledPricing();
+      assert(bundled !== null);
+      assert(bundled.models['gemini-3.7-flash']);
+      assert(bundled.models['claude-3.7-sonnet']);
+      assert(bundled.models['gpt-4o']);
+    });
+
+    await test('saveSyncedPricing and loadLocalSyncedPricing should persist and read cached data', () => {
+      const tmpCachePath = path.join(os.tmpdir(), `test_pricing_cache_${Date.now()}.json`);
+      const mockData = {
+        version: '9.9.9',
+        lastUpdated: '2026-08-27',
+        models: {
+          'custom-synced-test': {
+            id: 'custom-synced-test',
+            displayName: 'Custom Synced Test',
+            inputPerMillion: 0.99,
+            cachedInputPerMillion: 0.25,
+            outputPerMillion: 2.99
+          }
+        }
+      };
+
+      const saved = priceSyncer.saveSyncedPricing(mockData, tmpCachePath);
+      assert.strictEqual(saved, true);
+
+      const loaded = priceSyncer.loadLocalSyncedPricing(tmpCachePath);
+      assert(loaded !== null);
+      assert.strictEqual(loaded.version, '9.9.9');
+      assert.strictEqual(loaded.models['custom-synced-test'].inputPerMillion, 0.99);
+      assert(loaded._meta && loaded._meta.syncedAt);
+
+      fs.unlinkSync(tmpCachePath);
+    });
+
+    await test('getSyncedPricing should fallback to bundled pricing when cache is absent', () => {
+      const nonExistentPath = path.join(os.tmpdir(), `non_existent_${Date.now()}.json`);
+      const pricing = priceSyncer.getSyncedPricing({ cachePath: nonExistentPath });
+      assert(pricing !== null);
+      assert.strictEqual(pricing._source, 'bundled');
+      assert(pricing.models['gemini-3.7-flash']);
+    });
+
+    await test('syncPricing should gracefully handle unreachable URLs and fallback to bundled data', async () => {
+      const tmpCache = path.join(os.tmpdir(), `unreachable_cache_${Date.now()}.json`);
+      const result = await priceSyncer.syncPricing({
+        url: 'http://127.0.0.1:54321/unreachable-endpoint.json',
+        destPath: tmpCache,
+        timeoutMs: 500
+      });
+
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(result.source, 'bundled');
+      assert(result.modelCount > 0);
+      assert(result.error);
+    });
+
+    await test('syncPricing should download, validate, and update cache over HTTP mock server', async () => {
+      const mockServerPayload = {
+        schemaVersion: 1,
+        version: '2.0.0-mock',
+        lastUpdated: '2026-08-27',
+        sources: { test: 'https://test.local/pricing' },
+        models: {
+          'mock-gemini-next': {
+            id: 'mock-gemini-next',
+            displayName: 'Mock Gemini Next',
+            provider: 'google',
+            contextWindow: '2M',
+            inputPerMillion: 0.12,
+            cachedInputPerMillion: 0.03,
+            outputPerMillion: 0.48
+          }
+        }
+      };
+
+      // Create ephemeral local HTTP test server
+      const server = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(mockServerPayload));
+      });
+
+      await new Promise(res => server.listen(0, '127.0.0.1', res));
+      const port = server.address().port;
+      const testUrl = `http://127.0.0.1:${port}/pricing.json`;
+      const testDestPath = path.join(os.tmpdir(), `mock_synced_pricing_${Date.now()}.json`);
+
+      try {
+        const syncResult = await priceSyncer.syncPricing({
+          url: testUrl,
+          destPath: testDestPath,
+          timeoutMs: 2000
+        });
+
+        assert.strictEqual(syncResult.success, true);
+        assert.strictEqual(syncResult.source, 'remote');
+        assert.strictEqual(syncResult.version, '2.0.0-mock');
+        assert.strictEqual(syncResult.modelCount, 1);
+        assert(fs.existsSync(testDestPath));
+
+        const cachedContent = JSON.parse(fs.readFileSync(testDestPath, 'utf8'));
+        assert.strictEqual(cachedContent.models['mock-gemini-next'].inputPerMillion, 0.12);
+      } finally {
+        await new Promise(res => server.close(res));
+        if (fs.existsSync(testDestPath)) {
+          try { fs.unlinkSync(testDestPath); } catch (_e) {}
+        }
+      }
+    });
+  });
+
+  // --- Suite 13: Pricing Table Formatter Tests ---
+  await describe('13. Pricing Table Formatter Tests', async () => {
+    await test('formatProviderBadge should format badges with color tags', () => {
+      const googleBadge = priceSyncer.formatProviderBadge('google');
+      const anthropicBadge = priceSyncer.formatProviderBadge('anthropic');
+      const openaiBadge = priceSyncer.formatProviderBadge('openai');
+
+      assert(googleBadge.includes('Google'));
+      assert(anthropicBadge.includes('Anthropic'));
+      assert(openaiBadge.includes('OpenAI'));
+    });
+
+    await test('formatUnitRate should format currency amounts accurately', () => {
+      const usdRate = priceSyncer.formatUnitRate(0.15, 'usd');
+      assert.strictEqual(usdRate, '$0.1500');
+
+      const krwRate = priceSyncer.formatUnitRate(0.15, 'krw');
+      assert(krwRate.includes('217.5'));
+
+      const jpyRate = priceSyncer.formatUnitRate(0.15, 'jpy');
+      assert(jpyRate.includes('23.25'));
+
+      const eurRate = priceSyncer.formatUnitRate(1.0, 'eur');
+      assert(eurRate.includes('0.9500€'));
+    });
+
+    await test('formatPricingTable should render a full ASCII/ANSI table without error', () => {
+      const tableEn = priceSyncer.formatPricingTable('usd', 'en');
+      assert(tableEn.includes('Official API Pricing Catalog'));
+      assert(tableEn.includes('Gemini 3.7 Flash'));
+      assert(tableEn.includes('Claude 3.7 Sonnet'));
+      assert(tableEn.includes('GPT-4o'));
+      assert(tableEn.includes('o3-mini'));
+      assert(tableEn.includes('o1'));
+      assert(tableEn.includes('Official Sources:'));
+    });
+
+    await test('formatPricingTable should render properly in Korean, Japanese, and Chinese', () => {
+      const tableKo = priceSyncer.formatPricingTable('krw', 'ko');
+      assert(tableKo.includes('공식 API 가격 카탈로그'));
+      assert(tableKo.includes('제공사'));
+      assert(tableKo.includes('모델명'));
+
+      const tableJa = priceSyncer.formatPricingTable('jpy', 'ja');
+      assert(tableJa.includes('公式API価格カタログ'));
+      assert(tableJa.includes('プロバイダー'));
+
+      const tableZh = priceSyncer.formatPricingTable('usd', 'zh');
+      assert(tableZh.includes('官方 API 定价目录'));
+      assert(tableZh.includes('供应商'));
+    });
+  });
+
+  // --- Suite 14: Subcommand & Live Dispatcher Unit Tests ---
+  await describe('14. Subcommand & Live Dispatcher Unit Tests', async () => {
+    await test('parseArgs should handle prices, sync-prices, and options', () => {
+      const optsPrices = parseArgs(['node', 'bin/agy-tokens.js', '--prices', '--currency', 'krw']);
+      assert.strictEqual(optsPrices.prices, true);
+      assert.strictEqual(optsPrices.currency, 'krw');
+
+      const optsSync = parseArgs(['node', 'bin/agy-tokens.js', 'sync-prices']);
+      assert.strictEqual(optsSync.sync, true);
+
+      const optsAuto = parseArgs(['node', 'bin/agy-tokens.js', '--auto-sync']);
+      assert.strictEqual(optsAuto.autoSync, true);
+    });
+
+    await test('renderHelp should include pricing and sync commands', () => {
+      const help = formatter.renderHelp();
+      assert(help.includes('--prices'));
+      assert(help.includes('--sync'));
+      assert(help.includes('--auto-sync'));
     });
   });
 

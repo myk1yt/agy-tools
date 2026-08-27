@@ -657,6 +657,9 @@ function renderHelp() {
     ['--hook, --badge', t('cliOptHook')],
     ['--json', t('cliOptJson')],
     ['--fresh, --no-cache', t('cliOptFresh')],
+    ['--prices, --models', t('cliOptPrices')],
+    ['--sync, --sync-prices', t('cliOptSync')],
+    ['--auto-sync', t('cliOptAutoSync')],
     ['--no-color', t('cliOptNoColor')],
     ['--help, -h', t('cliOptHelp')],
     ['--version, -v', t('cliOptVersion')]
@@ -677,6 +680,8 @@ ${optLines}
 
 ${styleText('Examples:', 'bold')}
   $ agy-tokens
+  $ agy-tokens --prices --currency krw
+  $ agy-tokens --sync
   $ agy-tokens --7d --currency krw
   $ agy-tokens --range 2026-08-01..2026-08-27 --currency eur
   $ agy-tokens --session --lang ko

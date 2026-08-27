@@ -2,8 +2,8 @@
 
 /**
  * @fileoverview Unified CLI dispatcher and developer toolkit gateway for Antigravity.
- * Routes subcommands (e.g., `dashboard`, `tokens`, `usage`) to their respective modules,
- * defaulting to the Token & Cost Dashboard.
+ * Routes subcommands (e.g., `dashboard`, `tokens`, `prices`, `sync-prices`, `usage`)
+ * to their respective modules, defaulting to the Token & Cost Dashboard.
  */
 
 const { runCli } = require('../src/index');
@@ -24,6 +24,8 @@ function printToolkitHelp() {
 
 \x1b[1mAvailable Commands:\x1b[0m
   \x1b[33mdashboard, tokens, usage\x1b[0m   Token & Cost Dashboard (usage breakdown, cache %, costs) [Default]
+  \x1b[33mprices, models\x1b[0m             Display live official API pricing catalog for all /model choices
+  \x1b[33msync-prices, sync\x1b[0m          Synchronize latest official API pricing catalog from remote repo
   \x1b[33mhelp\x1b[0m                      Show this help screen
   \x1b[33mversion\x1b[0m                   Display toolkit version
 
@@ -40,10 +42,14 @@ function printToolkitHelp() {
   --model <name>              Override model pricing
   --free, --no-cost           Display pure token metrics without dollar cost (free subscription)
   --hook, --badge             1-line real-time badge for lifecycle hooks
+  --auto-sync                 Auto-sync pricing if older than 24 hours
   --json                      Raw JSON output
 
 \x1b[1mExamples:\x1b[0m
   $ agy-tools
+  $ agy-tools prices --currency krw
+  $ agy-tools prices --lang ko
+  $ agy-tools sync-prices
   $ agy-tools dashboard --7d --currency krw
   $ agy-tools dashboard --range 2026-08-01..2026-08-27
   $ agy-tools dashboard --free
@@ -63,6 +69,18 @@ async function main() {
 
   if (firstArg === 'version' && args.length === 1) {
     console.log(`agy-tools v${pkg.version}`);
+    return;
+  }
+
+  if (firstArg === 'sync-prices' || firstArg === 'sync') {
+    const forwardedArgv = [process.argv[0], process.argv[1], '--sync', ...args.slice(1)];
+    await runCli(forwardedArgv);
+    return;
+  }
+
+  if (firstArg === 'prices' || firstArg === 'models') {
+    const forwardedArgv = [process.argv[0], process.argv[1], '--prices', ...args.slice(1)];
+    await runCli(forwardedArgv);
     return;
   }
 
