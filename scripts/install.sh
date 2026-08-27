@@ -39,10 +39,22 @@ fi
 GEMINI_DIR="$HOME/.gemini"
 if [ -d "$GEMINI_DIR" ]; then
     echo "[INFO] Configuring Gemini skill and hook integrations..."
+
     mkdir -p "$GEMINI_DIR/skills/usage"
     cp "$ROOT_DIR/integrations/skills/usage/SKILL.md" "$GEMINI_DIR/skills/usage/SKILL.md"
-    cp "$ROOT_DIR/integrations/hooks.json" "$GEMINI_DIR/hooks.json"
-    echo "[SUCCESS] Configured /usage skill and PostInvocation hook in $GEMINI_DIR"
+
+    mkdir -p "$GEMINI_DIR/skills/tokens"
+    cp "$ROOT_DIR/integrations/skills/tokens/SKILL.md" "$GEMINI_DIR/skills/tokens/SKILL.md"
+
+    # Merge-safe hooks.json: only write if missing OR no "token-tracker" key (never clobber other hooks)
+    if [ ! -f "$GEMINI_DIR/hooks.json" ] || ! grep -q "token-tracker" "$GEMINI_DIR/hooks.json"; then
+        cp "$ROOT_DIR/integrations/hooks.json" "$GEMINI_DIR/hooks.json"
+        echo "[INFO] Installed token-tracker PostInvocation hook in $GEMINI_DIR/hooks.json"
+    else
+        echo "[INFO] Existing hooks.json already contains token-tracker; left untouched."
+    fi
+
+    echo "[SUCCESS] Configured usage + tokens skills and PostInvocation hook in $GEMINI_DIR"
 fi
 
 echo ""

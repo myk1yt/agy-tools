@@ -1,21 +1,20 @@
 ---
-name: usage
+name: tokens
 description: >-
-  Provides real-time token tracking, cache hit rate analytics, and API cost breakdown for Antigravity conversations. Activate this skill whenever the user asks about token consumption, costs, API usage, or enters /tokens, /cost, or /dashboard. NOTE: /usage is a built-in agy system command (quota panel) and CANNOT trigger this skill. Use /tokens, /cost, or /dashboard instead.
+  Provides real-time token tracking, cache hit rate analytics, and API cost breakdown for Antigravity conversations. Activate this skill whenever the user enters /tokens, /cost, or /dashboard, or asks about token consumption, costs, or API usage. This is the working slash-command entry point for the token dashboard (the built-in /usage command is reserved by agy for the quota panel).
 ---
 
-# Token & Cost Analytics Skill (`usage`)
+# Token & Cost Analytics Skill (`tokens`)
 
 Provides real-time token tracking, cache hit rate analytics, and API cost breakdown directly within Antigravity conversations.
 
-> ⚠️ **IMPORTANT — Slash Command Precedence**
-> `/usage` is a **built-in agy system command** (model quota panel: Gemini/Claude weekly + 5-hour limits) and **CANNOT trigger this skill**.
-> The working slash triggers for this skill are: **`/tokens`**, **`/cost`**, **`/dashboard`** — plus natural language such as "오늘 토큰 사용량 알려줘" or "how many tokens did I use today?".
+> ⚠️ **NOTE — Slash Command Precedence**
+> `/usage` is a **built-in agy system command** (model quota panel) and cannot trigger a skill. This `tokens` skill provides the working slash triggers: **`/tokens`**, **`/cost`**, **`/dashboard`** — plus natural language such as "오늘 토큰 사용량 알려줘" or "how many tokens did I use today?".
 
 ## When to Activate
 Activate this skill whenever:
+- The user enters `/tokens`, `/cost`, `/dashboard`, or `/stats`.
 - The user asks about token consumption, token counts, cache savings, or API billing costs.
-- The user issues commands like `/tokens`, `/cost`, `/dashboard`, or `/stats`.
 - The user asks for daily, 7-day, 30-day, or conversation session breakdown.
 
 ## Instructions
@@ -33,6 +32,7 @@ Activate this skill whenever:
 2. Select additional flags based on user intent (combine with the command above):
    - **7-Day Trend**: `agy-tokens --7d`
    - **30-Day Trend**: `agy-tokens --30d`
+   - **Instant Dashboard**: `agy-tokens --today` (same as bare `agy-tokens`)
    - **Custom Range**: `agy-tokens --range YYYY-MM-DD..YYYY-MM-DD`
    - **Current / Specific Session**: `agy-tokens --session` or `agy-tokens --session <sessionId>`
    - **Currency Preference**: `--currency krw` / `--currency usd` / `--currency eur` / `--currency jpy`
@@ -67,6 +67,11 @@ agy-tokens --session
 
 # Specific session ID
 agy-tokens --session <session-id>
+```
+
+### 4b. Instant Dashboard (alias)
+```bash
+agy-tokens --today
 ```
 
 ### 5. Multi-Language Output

@@ -35,10 +35,28 @@ if %ERRORLEVEL% equ 0 (
 set "GEMINI_DIR=%USERPROFILE%\.gemini"
 if exist "%GEMINI_DIR%" (
     echo [INFO] Configuring Gemini skill and hook integrations...
+
     if not exist "%GEMINI_DIR%\skills\usage" mkdir "%GEMINI_DIR%\skills\usage"
     copy /y "%ROOT_DIR%\integrations\skills\usage\SKILL.md" "%GEMINI_DIR%\skills\usage\SKILL.md" >nul 2>nul
-    copy /y "%ROOT_DIR%\integrations\hooks.json" "%GEMINI_DIR%\hooks.json" >nul 2>nul
-    echo [SUCCESS] Configured /usage skill and PostInvocation hook in %GEMINI_DIR%
+
+    if not exist "%GEMINI_DIR%\skills\tokens" mkdir "%GEMINI_DIR%\skills\tokens"
+    copy /y "%ROOT_DIR%\integrations\skills\tokens\SKILL.md" "%GEMINI_DIR%\skills\tokens\SKILL.md" >nul 2>nul
+
+    REM Merge-safe hooks.json: only write if missing OR no "token-tracker" key (never clobber other hooks)
+    set "HOOKS_MERGE_NEEDED=0"
+    if not exist "%GEMINI_DIR%\hooks.json" set "HOOKS_MERGE_NEEDED=1"
+    if "!HOOKS_MERGE_NEEDED!"=="0" (
+        findstr /c:"token-tracker" "%GEMINI_DIR%\hooks.json" >nul 2>nul
+        if errorlevel 1 set "HOOKS_MERGE_NEEDED=1"
+    )
+    if "!HOOKS_MERGE_NEEDED!"=="1" (
+        copy /y "%ROOT_DIR%\integrations\hooks.json" "%GEMINI_DIR%\hooks.json" >nul 2>nul
+        echo [INFO] Installed token-tracker PostInvocation hook in %GEMINI_DIR%\hooks.json
+    ) else (
+        echo [INFO] Existing hooks.json already contains token-tracker; left untouched.
+    )
+
+    echo [SUCCESS] Configured usage + tokens skills and PostInvocation hook in %GEMINI_DIR%
 )
 
 echo.

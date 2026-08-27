@@ -18,7 +18,7 @@
 - 📊 **Rich ANSI Terminal Dashboard & Summary Cards**: Visual status cards, formatted daily breakdown tables with cache hit percentages, and turn-by-turn session inspection.
 - 🌐 **Full Multi-Language (i18n) Support**: Native auto-locale detection with manual `--lang` override supporting English (`en`), Korean (`ko`), Japanese (`ja`), and Chinese (`zh`).
 - 💱 **Multi-Currency Converter**: Real-time conversion to `USD ($)`, `KRW (₩)`, `JPY (¥)`, `EUR (€)`, and `GBP (£)`.
-- 🪝 **Antigravity Lifecycle Hook Integration**: Lightweight 1-line real-time status badges for Antigravity `PostInvocation` hooks and `/usage` slash command.
+- 🪝 **Antigravity Lifecycle Hook Integration**: Lightweight 1-line real-time status badges for Antigravity `PostInvocation` hooks and `/tokens` `/cost` `/dashboard` slash commands (note: `/usage` is reserved by agy for the built-in quota panel).
 - 🔒 **100% Privacy Preserving**: Zero network telemetry. All parsing and aggregation executes strictly on your local machine.
 
 ---
@@ -248,7 +248,28 @@ To automatically display a real-time token and cost badge after every turn in An
 }
 ```
 
-2. Add the `/usage` slash command skill from [`integrations/skills/usage/SKILL.md`](integrations/skills/usage/SKILL.md).
+2. Add the token dashboard skills from [`integrations/skills/usage/SKILL.md`](integrations/skills/usage/SKILL.md) and [`integrations/skills/tokens/SKILL.md`](integrations/skills/tokens/SKILL.md) to `~/.gemini/skills/` (the installer scripts do this automatically).
+
+> ⚠️ **`/usage` is reserved by agy.** In agy ≥ 1.1.22, `/usage` is a **built-in system command** that shows the model quota panel (Gemini/Claude weekly + 5-hour limits). System slash commands take precedence over skill-derived slash commands, so a skill named `usage` will never be triggered by typing `/usage`.
+>
+> **Working triggers for the token dashboard:**
+> - `/tokens` — instant dashboard (recommended)
+> - `/cost` — cost-focused view
+> - `/dashboard` — full dashboard
+> - Natural language: "오늘 토큰 사용량 알려줘", "how many tokens did I use today?"
+>
+> The `usage` skill is still installed because it remains **model-invocable** when you ask about tokens/costs in plain language — it just cannot be triggered by the literal `/usage` slash command.
+
+3. *(Optional)* Live status badge in the agy status bar — add to `~/.gemini/antigravity-cli/settings.json`:
+```json
+"statusLine": {
+  "type": "command",
+  "command": "agy-tokens --hook --raw",
+  "enabled": true,
+  "stack_with_default": true
+}
+```
+The statusline script receives the session JSON state on stdin and prints a one-line `⚡ [Antigravity]` badge; `agy-tokens --hook --raw` is already compatible (reads stdin with a 50ms timeout).
 
 ---
 
