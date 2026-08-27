@@ -38,6 +38,7 @@ function printToolkitHelp() {
   --currency <usd|krw|jpy|eur> Display currency
   --lang <en|ko|ja|zh>        Interface language
   --model <name>              Override model pricing
+  --free, --no-cost           Display pure token metrics without dollar cost (free subscription)
   --hook, --badge             1-line real-time badge for lifecycle hooks
   --json                      Raw JSON output
 
@@ -45,6 +46,7 @@ function printToolkitHelp() {
   $ agy-tools
   $ agy-tools dashboard --7d --currency krw
   $ agy-tools dashboard --range 2026-08-01..2026-08-27
+  $ agy-tools dashboard --free
   $ agy-dashboard --today --lang ko
   $ agy-tokens --hook
 `);

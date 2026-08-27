@@ -45,6 +45,8 @@ const TRANSLATIONS = {
     totalTurns: 'Total Turns',
     totalSessions: 'Total Sessions',
     avgTokensPerTurn: 'Avg Tokens / Turn',
+    freeQuota: 'Free Quota',
+    freeCostLabel: 'Free ($0.00)',
 
     // Table Headers
     colDate: 'Date',
@@ -85,6 +87,7 @@ const TRANSLATIONS = {
     cliOptCurrency: 'Select display currency (usd, krw, jpy, eur, gbp)',
     cliOptLang: 'Select interface language (en, ko, ja, zh)',
     cliOptModel: 'Override active model pricing (e.g., gemini-3.7-flash, claude-3.7-sonnet)',
+    cliOptFree: 'Display pure token metrics without dollar cost (free/flat subscription quota)',
     cliOptJson: 'Output raw JSON for script integration',
     cliOptHook: 'Output 1-line real-time status badge for Antigravity PostInvocation hook',
     cliOptFresh: 'Bypass cache and force re-parsing of all transcript logs',
@@ -128,6 +131,8 @@ const TRANSLATIONS = {
     totalTurns: '총 턴(Turn) 수',
     totalSessions: '총 세션 수',
     avgTokensPerTurn: '턴당 평균 토큰',
+    freeQuota: '무료 플랜',
+    freeCostLabel: '무료 (₩0)',
 
     // Table Headers
     colDate: '날짜',
@@ -168,6 +173,7 @@ const TRANSLATIONS = {
     cliOptCurrency: '표시 통화 선택 (usd, krw, jpy, eur, gbp)',
     cliOptLang: '인터페이스 언어 선택 (en, ko, ja, zh)',
     cliOptModel: '적용할 모델 가격 수동 지정 (예: gemini-3.7-flash, claude-3.7-sonnet)',
+    cliOptFree: '비용(달러) 없이 순수 토큰 사용량만 표시 (무료/구독 플랫 요금제)',
     cliOptJson: '프로그래밍 연동을 위한 순수 JSON 출력',
     cliOptHook: 'Antigravity PostInvocation 훅용 1줄 실시간 상태 배지 출력',
     cliOptFresh: '캐시를 무시하고 모든 로그 파일을 새로 파싱',
@@ -211,6 +217,8 @@ const TRANSLATIONS = {
     totalTurns: '総ターン数',
     totalSessions: '総セッション数',
     avgTokensPerTurn: 'ターン平均トークン',
+    freeQuota: '無料枠',
+    freeCostLabel: '無料 (¥0)',
 
     // Table Headers
     colDate: '日付',
@@ -251,6 +259,7 @@ const TRANSLATIONS = {
     cliOptCurrency: '表示通貨を選択 (usd, krw, jpy, eur, gbp)',
     cliOptLang: '言語を選択 (en, ko, ja, zh)',
     cliOptModel: 'モデル価格の上書き (例: gemini-3.7-flash, claude-3.7-sonnet)',
+    cliOptFree: '金額を表示せず純粋なトークン量のみを表示 (無料/定額プラン)',
     cliOptJson: 'プログラム連携用のJSON形式で出力',
     cliOptHook: 'Antigravity PostInvocation フック用の1行バッジを出力',
     cliOptFresh: 'キャッシュを破棄して全ログを再解析',
@@ -294,6 +303,8 @@ const TRANSLATIONS = {
     totalTurns: '总轮次',
     totalSessions: '总会话数',
     avgTokensPerTurn: '每轮平均 Token',
+    freeQuota: '免费配额',
+    freeCostLabel: '免费 ($0.00)',
 
     // Table Headers
     colDate: '日期',
@@ -334,6 +345,7 @@ const TRANSLATIONS = {
     cliOptCurrency: '选择显示货币 (usd, krw, jpy, eur, gbp)',
     cliOptLang: '选择界面语言 (en, ko, ja, zh)',
     cliOptModel: '覆盖模型定价规则 (例如: gemini-3.7-flash, claude-3.7-sonnet)',
+    cliOptFree: '仅显示纯 Token 用量指标，不计算费用（免费/订阅制配额）',
     cliOptJson: '输出原始 JSON 供脚本集成使用',
     cliOptHook: '输出用于 Antigravity PostInvocation 钩子的单行实时状态徽章',
     cliOptFresh: '忽略缓存并强制重新解析所有日志文件',

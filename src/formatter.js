@@ -195,13 +195,17 @@ function renderProgressBar(percentage, barWidth = 10) {
  * @param {string} modelName - Model name.
  * @param {string} currencyCode - Currency code.
  * @param {string} dateRange - Date or date range string.
+ * @param {boolean} [isFree=false] - Free subscription quota mode flag.
  * @returns {string}
  */
-function renderBanner(periodTitle, modelName, currencyCode, dateRange) {
+function renderBanner(periodTitle, modelName, currencyCode, dateRange, isFree = false) {
   const line = '━'.repeat(68);
   const appTitle = styleText(t('appName'), 'brightCyan');
   const tag = styleText(t('tagline'), 'dim');
   const currInfo = CURRENCIES[currencyCode] || CURRENCIES.usd;
+  const currencyDisplay = isFree
+    ? `${currInfo.code} [${t('freeQuota')}]`
+    : `${currInfo.code} (${currInfo.symbol})`;
 
   const header = [
     styleText(`┏${line}┓`, 'cyan'),
@@ -216,7 +220,7 @@ function renderBanner(periodTitle, modelName, currencyCode, dateRange) {
       styleText('┃', 'cyan'),
     styleText('┃', 'cyan') +
       padDisplay(
-        `  ${styleText(t('currency') + ':', 'bold')} ${styleText(currInfo.code + ' (' + currInfo.symbol + ')', 'brightWhite')}` +
+        `  ${styleText(t('currency') + ':', 'bold')} ${styleText(currencyDisplay, 'brightWhite')}` +
           `  |  ${styleText('Locale:', 'bold')} ${styleText(getLocale().toUpperCase(), 'magenta')}`,
         68
       ) +
@@ -231,14 +235,15 @@ function renderBanner(periodTitle, modelName, currencyCode, dateRange) {
  * Renders key summary KPI metric cards.
  * @param {object} summary - Aggregated summary object.
  * @param {string} currencyCode - Currency code.
+ * @param {boolean} [isFree=false] - Free subscription quota mode flag.
  * @returns {string}
  */
-function renderSummaryMetrics(summary, currencyCode) {
+function renderSummaryMetrics(summary, currencyCode, isFree = false) {
   const boxWidth = 33;
   const divider = '─'.repeat(boxWidth);
 
-  const costStr = formatCurrency(summary.costUsd, currencyCode);
-  const savingsStr = formatCurrency(summary.cacheSavingsUsd, currencyCode);
+  const costStr = isFree ? t('freeCostLabel') : formatCurrency(summary.costUsd, currencyCode);
+  const savingsStr = isFree ? t('freeCostLabel') : formatCurrency(summary.cacheSavingsUsd, currencyCode);
   const hitRateStr = `${(summary.cacheHitRate || 0).toFixed(1)}%`;
 
   const leftCard = [
@@ -253,15 +258,17 @@ function renderSummaryMetrics(summary, currencyCode) {
     `└${divider}┘`
   ];
 
+  const savingsDetail = isFree ? ` (${t('freeQuota')})` : ` (${t('cacheSavings')}: ${savingsStr})`;
+
   const rightCard = [
     `┌${divider}┐`,
     `│ ${padDisplay(styleText(t('totalCost'), 'bold'), boxWidth - 2)} │`,
-    `│ ${padDisplay(styleText(costStr, 'brightGreen') + styleText(` (${t('cacheSavings')}: ${savingsStr})`, 'dim'), boxWidth - 2)} │`,
+    `│ ${padDisplay(styleText(costStr, 'brightGreen') + styleText(savingsDetail, 'dim'), boxWidth - 2)} │`,
     `├${divider}┤`,
     `│ ${padDisplay(`${t('totalSessions')}: ${styleText(formatNumber(summary.totalSessions), 'white')}`, boxWidth - 2)} │`,
     `│ ${padDisplay(`${t('totalTurns')}: ${styleText(formatNumber(summary.totalTurns), 'white')}`, boxWidth - 2)} │`,
     `│ ${padDisplay(`${t('avgTokensPerTurn')}: ${styleText(formatCompact(summary.totalTurns > 0 ? summary.totalTokens / summary.totalTurns : 0), 'cyan')}`, boxWidth - 2)} │`,
-    `│ ${padDisplay(`${t('cacheSavings')}: ${styleText(savingsStr, 'brightYellow')}`, boxWidth - 2)} │`,
+    `│ ${padDisplay(`${t('cacheSavings')}: ${styleText(isFree ? `${formatCompact(summary.cachedTokens)} tok` : savingsStr, 'brightYellow')}`, boxWidth - 2)} │`,
     `└${divider}┘`
   ];
 
@@ -278,9 +285,10 @@ function renderSummaryMetrics(summary, currencyCode) {
  * @param {Array<object>} dailyList - List of daily aggregation items.
  * @param {string} currencyCode - Currency code.
  * @param {object} grandTotal - Summary grand total.
+ * @param {boolean} [isFree=false] - Free subscription quota mode flag.
  * @returns {string}
  */
-function renderDailyTable(dailyList, currencyCode, grandTotal) {
+function renderDailyTable(dailyList, currencyCode, grandTotal, isFree = false) {
   if (!dailyList || dailyList.length === 0) {
     return styleText(`\n  ${t('noDataFound')}\n`, 'dim');
   }
@@ -395,6 +403,13 @@ function renderDailyTable(dailyList, currencyCode, grandTotal) {
   for (const item of dailyList) {
     const isZero = item.totalTokens === 0;
     const dateFormatted = isZero ? styleText(item.date, 'dim') : styleText(item.date, 'white');
+    const costDisplay = isFree
+      ? (isZero ? '-' : styleText('$0.00', 'brightGreen'))
+      : (isZero ? '-' : styleText(formatCurrency(item.costUsd, currencyCode), 'brightGreen'));
+    const savingsDisplay = isFree
+      ? (isZero ? '-' : styleText('$0.00', 'dim'))
+      : (isZero ? '-' : styleText(formatCurrency(item.cacheSavingsUsd, currencyCode), 'dim'));
+
     const row =
       '│' +
       padDisplay(dateFormatted, colWidths.date, 'center') +
@@ -413,15 +428,18 @@ function renderDailyTable(dailyList, currencyCode, grandTotal) {
       '│' +
       padDisplay(isZero ? '-' : `${(item.cacheHitRate || 0).toFixed(0)}%`, colWidths.hit, 'right') +
       '│' +
-      padDisplay(isZero ? '-' : styleText(formatCurrency(item.costUsd, currencyCode), 'brightGreen'), colWidths.cost, 'right') +
+      padDisplay(costDisplay, colWidths.cost, 'right') +
       '│' +
-      padDisplay(isZero ? '-' : styleText(formatCurrency(item.cacheSavingsUsd, currencyCode), 'dim'), colWidths.savings, 'right') +
+      padDisplay(savingsDisplay, colWidths.savings, 'right') +
       '│';
     rows.push(row);
   }
 
   if (grandTotal) {
     rows.push(midBorder);
+    const grandCost = isFree ? '$0.00' : formatCurrency(grandTotal.costUsd, currencyCode);
+    const grandSavings = isFree ? '$0.00' : formatCurrency(grandTotal.cacheSavingsUsd, currencyCode);
+
     const totalRow =
       '│' +
       padDisplay(styleText(t('colGrandTotal'), 'bold'), colWidths.date, 'center') +
@@ -440,9 +458,9 @@ function renderDailyTable(dailyList, currencyCode, grandTotal) {
       '│' +
       padDisplay(styleText(`${(grandTotal.cacheHitRate || 0).toFixed(0)}%`, 'bold'), colWidths.hit, 'right') +
       '│' +
-      padDisplay(styleText(formatCurrency(grandTotal.costUsd, currencyCode), 'brightGreen'), colWidths.cost, 'right') +
+      padDisplay(styleText(grandCost, 'brightGreen'), colWidths.cost, 'right') +
       '│' +
-      padDisplay(styleText(formatCurrency(grandTotal.cacheSavingsUsd, currencyCode), 'dim'), colWidths.savings, 'right') +
+      padDisplay(styleText(grandSavings, 'dim'), colWidths.savings, 'right') +
       '│';
     rows.push(totalRow);
   }
@@ -455,18 +473,21 @@ function renderDailyTable(dailyList, currencyCode, grandTotal) {
  * Renders turn-by-turn breakdown table for a single session.
  * @param {object} session - Parsed session object.
  * @param {string} currencyCode - Currency code.
+ * @param {boolean} [isFree=false] - Free subscription quota mode flag.
  * @returns {string}
  */
-function renderSessionTable(session, currencyCode) {
+function renderSessionTable(session, currencyCode, isFree = false) {
   if (!session || !session.turns || session.turns.length === 0) {
     return styleText(`\n  ${t('noDataFound')}\n`, 'dim');
   }
+
+  const costSummaryStr = isFree ? t('freeCostLabel') : formatCurrency(session.costUsd, currencyCode);
 
   const infoBlock = [
     styleText(`\n📌 ${t('periodSession')}: ${session.title || session.sessionId}`, 'bold'),
     `   ${styleText('ID:', 'dim')} ${session.sessionId} | ${styleText(t('workspace') + ':', 'dim')} ${session.workspace}`,
     `   ${styleText(t('timeRange') + ':', 'dim')} ${session.startTime} ~ ${session.endTime}`,
-    `   ${styleText(t('totalTokens') + ':', 'dim')} ${formatNumber(session.totalTokens)} | ${styleText(t('totalCost') + ':', 'dim')} ${formatCurrency(session.costUsd, currencyCode)} | ${styleText(t('cacheHitRate') + ':', 'dim')} ${(session.cacheHitRate || 0).toFixed(1)}%\n`
+    `   ${styleText(t('totalTokens') + ':', 'dim')} ${formatNumber(session.totalTokens)} | ${styleText(t('totalCost') + ':', 'dim')} ${costSummaryStr} | ${styleText(t('cacheHitRate') + ':', 'dim')} ${(session.cacheHitRate || 0).toFixed(1)}%\n`
   ].join('\n');
 
   const colWidths = {
@@ -560,6 +581,8 @@ function renderSessionTable(session, currencyCode) {
 
   for (const turn of session.turns) {
     const previewTrunc = (turn.preview || '').substring(0, 30);
+    const turnCostDisplay = isFree ? '$0.00' : formatCurrency(turn.costUsd, currencyCode);
+
     const row =
       '│' +
       padDisplay(String(turn.stepIndex), colWidths.step, 'center') +
@@ -574,7 +597,7 @@ function renderSessionTable(session, currencyCode) {
       '│' +
       padDisplay(styleText(formatCompact(turn.outputTokens), 'yellow'), colWidths.output, 'right') +
       '│' +
-      padDisplay(styleText(formatCurrency(turn.costUsd, currencyCode), 'brightGreen'), colWidths.cost, 'right') +
+      padDisplay(styleText(turnCostDisplay, 'brightGreen'), colWidths.cost, 'right') +
       '│' +
       padDisplay(previewTrunc, colWidths.preview, 'left') +
       '│';
@@ -588,14 +611,19 @@ function renderSessionTable(session, currencyCode) {
 /**
  * Generates a 1-line real-time status badge string for PostInvocation hooks.
  * @param {object} badgeData - Turn & daily metrics.
- * @param {string} currencyCode - Currency code.
+ * @param {string} [currencyCode='usd'] - Currency code.
+ * @param {boolean} [isFree=false] - Free subscription quota mode flag.
  * @returns {string}
  */
-function renderRealTimeBadge(badgeData, currencyCode = 'usd') {
+function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false) {
   const turnTok = formatCompact(badgeData.turnTokens || 0);
-  const turnCost = formatCurrency(badgeData.turnCostUsd || 0, currencyCode);
+  const turnCost = isFree || badgeData.isFree
+    ? t('freeCostLabel')
+    : formatCurrency(badgeData.turnCostUsd || 0, currencyCode);
   const todayTok = formatCompact(badgeData.todayTokens || 0);
-  const todayCost = formatCurrency(badgeData.todayCostUsd || 0, currencyCode);
+  const todayCost = isFree || badgeData.isFree
+    ? t('freeCostLabel')
+    : formatCurrency(badgeData.todayCostUsd || 0, currencyCode);
   const cacheHit = `${(badgeData.cacheHitRate || 0).toFixed(0)}%`;
 
   return (
@@ -625,6 +653,7 @@ function renderHelp() {
     ['--currency <usd|krw|jpy|eur|gbp>', t('cliOptCurrency')],
     ['--lang <en|ko|ja|zh>', t('cliOptLang')],
     ['--model <name>', t('cliOptModel')],
+    ['--free, --no-cost', t('cliOptFree')],
     ['--hook, --badge', t('cliOptHook')],
     ['--json', t('cliOptJson')],
     ['--fresh, --no-cache', t('cliOptFresh')],
@@ -651,6 +680,7 @@ ${styleText('Examples:', 'bold')}
   $ agy-tokens --7d --currency krw
   $ agy-tokens --range 2026-08-01..2026-08-27 --currency eur
   $ agy-tokens --session --lang ko
+  $ agy-tokens --free
   $ agy-tokens --hook
 `;
 }

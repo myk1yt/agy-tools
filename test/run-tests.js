@@ -127,7 +127,7 @@ async function runAllTests() {
   });
 
   // --- Suite 2: Configuration & Pricing Unit Tests ---
-  await describe('2. Configuration & Pricing Unit Tests', async () => {
+  await describe('2. Configuration & Dynamic Pricing Unit Tests', async () => {
     await test('Should resolve default pricing for Gemini 3.7 Flash', () => {
       const pricing = config.getModelPricing('Gemini 3.7 Flash (High)');
       assert.strictEqual(pricing.id, 'gemini-3.7-flash');
@@ -142,6 +142,107 @@ async function runAllTests() {
       assert.strictEqual(pricing.inputPerMillion, 3.00);
       assert.strictEqual(pricing.cachedInputPerMillion, 0.30);
       assert.strictEqual(pricing.outputPerMillion, 15.00);
+    });
+
+    await test('Should dynamically resolve Flash Tier via smart fuzzy heuristic for unlisted models (e.g., gemini-4.0-flash-next)', () => {
+      const modelsToTest = [
+        'gemini-4.0-flash-next',
+        'gpt-4o-mini',
+        'claude-3.5-haiku',
+        'gemini-2.0-flash-lite',
+        'custom-turbo-model',
+        'mistral-small'
+      ];
+
+      for (const m of modelsToTest) {
+        const pricing = config.getModelPricing(m);
+        assert.strictEqual(pricing.inputPerMillion, 0.15, `Expected input 0.15 for ${m}`);
+        assert.strictEqual(pricing.cachedInputPerMillion, 0.0375, `Expected cached input 0.0375 for ${m}`);
+        assert.strictEqual(pricing.outputPerMillion, 0.60, `Expected output 0.60 for ${m}`);
+        assert.strictEqual(pricing.tier, 'flash', `Expected flash tier for ${m}`);
+      }
+    });
+
+    await test('Should dynamically resolve Pro Tier via smart fuzzy heuristic for unlisted models (e.g., gemini-3.5-pro-preview)', () => {
+      const modelsToTest = [
+        'gemini-3.5-pro-preview',
+        'claude-3-opus',
+        'gemini-ultra-preview',
+        'llama-3-70b-large',
+        'qwen-max-latest',
+        'deepseek-high'
+      ];
+
+      for (const m of modelsToTest) {
+        const pricing = config.getModelPricing(m);
+        assert.strictEqual(pricing.inputPerMillion, 1.25, `Expected input 1.25 for ${m}`);
+        assert.strictEqual(pricing.cachedInputPerMillion, 0.3125, `Expected cached input 0.3125 for ${m}`);
+        assert.strictEqual(pricing.outputPerMillion, 5.00, `Expected output 5.00 for ${m}`);
+        assert.strictEqual(pricing.tier, 'pro', `Expected pro tier for ${m}`);
+      }
+    });
+
+    await test('Should dynamically resolve Free Tier for unlisted free/flat/local/ollama models (e.g., custom-free-model)', () => {
+      const modelsToTest = [
+        'custom-free-model',
+        'ollama-llama3',
+        'my-local-model',
+        'subscription-flat-tier',
+        'zero-cost-model'
+      ];
+
+      for (const m of modelsToTest) {
+        const pricing = config.getModelPricing(m);
+        assert.strictEqual(pricing.inputPerMillion, 0.0, `Expected input 0.0 for ${m}`);
+        assert.strictEqual(pricing.cachedInputPerMillion, 0.0, `Expected cached input 0.0 for ${m}`);
+        assert.strictEqual(pricing.outputPerMillion, 0.0, `Expected output 0.0 for ${m}`);
+        assert.strictEqual(pricing.tier, 'free', `Expected free tier for ${m}`);
+
+        const cost = config.calculateCostUsd(500000, 500000, 500000, m);
+        assert.strictEqual(cost, 0, `Expected cost 0 for free model ${m}`);
+      }
+    });
+
+    await test('Should direct-invoke smartHeuristicPricing for heuristic resolution and display names', () => {
+      const flashRes = config.smartHeuristicPricing('gemini-4.0-flash-next');
+      assert.strictEqual(flashRes.tier, 'flash');
+      assert.strictEqual(flashRes.inputPerMillion, 0.15);
+      assert.strictEqual(flashRes.displayName, 'Gemini 4.0 Flash Next');
+
+      const proRes = config.smartHeuristicPricing('gemini-3.5-pro-preview');
+      assert.strictEqual(proRes.tier, 'pro');
+      assert.strictEqual(proRes.inputPerMillion, 1.25);
+      assert.strictEqual(proRes.displayName, 'Gemini 3.5 Pro Preview');
+
+      const freeRes = config.smartHeuristicPricing('custom-free-model');
+      assert.strictEqual(freeRes.tier, 'free');
+      assert.strictEqual(freeRes.inputPerMillion, 0.0);
+      assert.strictEqual(freeRes.displayName, 'Custom Free Model');
+    });
+
+    await test('Should fallback to Default Flash Tier with auto-generated displayName for unknown models', () => {
+      const pricing = config.getModelPricing('deepseek-chat-general');
+      assert.strictEqual(pricing.inputPerMillion, 0.15);
+      assert.strictEqual(pricing.cachedInputPerMillion, 0.0375);
+      assert.strictEqual(pricing.outputPerMillion, 0.60);
+      assert(pricing.displayName.includes('Deepseek Chat General'));
+    });
+
+    await test('Should merge user configuration custom pricing models directly into MODEL_PRICING', () => {
+      config.MODEL_PRICING['custom-enterprise-test'] = {
+        id: 'custom-enterprise-test',
+        displayName: 'Custom Enterprise Test',
+        inputPerMillion: 2.50,
+        cachedInputPerMillion: 0.50,
+        outputPerMillion: 10.00,
+        aliases: ['custom-enterprise-test', 'custom-enterprise']
+      };
+
+      const resolved = config.getModelPricing('custom-enterprise');
+      assert.strictEqual(resolved.id, 'custom-enterprise-test');
+      assert.strictEqual(resolved.inputPerMillion, 2.50);
+      assert.strictEqual(resolved.cachedInputPerMillion, 0.50);
+      assert.strictEqual(resolved.outputPerMillion, 10.00);
     });
 
     await test('Should calculate token cost accurately in USD', () => {
@@ -473,6 +574,23 @@ async function runAllTests() {
       assert(badgeStr.includes('85.0k'));
       assert(badgeStr.includes('75%'));
     });
+
+    await test('Should generate badge in free quota mode', () => {
+      const badgeStr = formatter.renderRealTimeBadge(
+        {
+          turnTokens: 2100,
+          turnCostUsd: 0,
+          todayTokens: 85000,
+          todayCostUsd: 0,
+          cacheHitRate: 75.4
+        },
+        'usd',
+        true
+      );
+
+      assert(badgeStr.includes('⚡ [Antigravity]'));
+      assert(badgeStr.includes('Free'));
+    });
   });
 
   // --- Suite 9: CLI Argument Parsing Unit Tests ---
@@ -503,6 +621,14 @@ async function runAllTests() {
       assert.strictEqual(opts.lang, 'ko');
       assert.strictEqual(opts.model, 'claude-3.7-sonnet');
       assert.strictEqual(opts.json, true);
+    });
+
+    await test('Should parse --free and --no-cost flags', () => {
+      const optsFree = parseArgs(['node', 'bin/agy-tokens.js', '--free']);
+      assert.strictEqual(optsFree.free, true);
+
+      const optsNoCost = parseArgs(['node', 'bin/agy-tokens.js', '--no-cost']);
+      assert.strictEqual(optsNoCost.free, true);
     });
 
     await test('Should parse range and session options', () => {

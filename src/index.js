@@ -34,6 +34,7 @@ function parseArgs(argv) {
     currency: null,
     lang: null,
     model: null,
+    free: false,
     json: false,
     hook: false,
     fresh: false,
@@ -88,6 +89,8 @@ function parseArgs(argv) {
       i++;
     } else if (arg.startsWith('--model=')) {
       options.model = arg.split('=')[1];
+    } else if (arg === '--free' || arg === '--no-cost') {
+      options.free = true;
     } else if (arg === '--json') {
       options.json = true;
     } else if (arg === '--hook' || arg === '--badge') {
@@ -135,6 +138,9 @@ async function runCli(argv = process.argv) {
     i18n.setLocale(targetLang);
   }
 
+  // Determine if free/no-cost quota mode is enabled
+  const isFree = Boolean(options.free || userConfig.free || userConfig.noCost);
+
   // Version check
   if (options.version) {
     console.log(`agy-tokens v${pkg.version}`);
@@ -152,7 +158,8 @@ async function runCli(argv = process.argv) {
     const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
     const result = await hookHandler.handlePostInvocation({
       currency,
-      modelName: options.model
+      modelName: options.model,
+      isFree
     });
     if (options.json) {
       console.log(JSON.stringify(result, null, 2));
@@ -192,9 +199,10 @@ async function runCli(argv = process.argv) {
         i18n.t('periodSession'),
         activeModel,
         currency,
-        sessionDetail.startTime.split('T')[0]
+        sessionDetail.startTime.split('T')[0],
+        isFree
       );
-      const table = formatter.renderSessionTable(sessionDetail, currency);
+      const table = formatter.renderSessionTable(sessionDetail, currency, isFree);
       console.log(banner);
       console.log(table);
     }
@@ -245,7 +253,15 @@ async function runCli(argv = process.argv) {
       dateRange,
       model: activeModel,
       currency,
-      metrics: reportData,
+      freeQuota: isFree,
+      metrics: isFree
+        ? {
+            ...reportData,
+            costUsd: 0,
+            cacheSavingsUsd: 0,
+            daily: reportData.daily ? reportData.daily.map(d => ({ ...d, costUsd: 0, cacheSavingsUsd: 0 })) : undefined
+          }
+        : reportData,
       cacheStats: {
         totalSessions: syncResult.sessions.length,
         parsedCount: syncResult.parsedCount,
@@ -257,14 +273,18 @@ async function runCli(argv = process.argv) {
   }
 
   // Visual Terminal Output
-  const banner = formatter.renderBanner(periodTitle, activeModel, currency, dateRange);
-  const summaryCard = formatter.renderSummaryMetrics(reportData, currency);
+  const banner = formatter.renderBanner(periodTitle, activeModel, currency, dateRange, isFree);
+  const summaryCard = formatter.renderSummaryMetrics(
+    isFree ? { ...reportData, costUsd: 0, cacheSavingsUsd: 0 } : reportData,
+    currency,
+    isFree
+  );
 
   console.log('\n' + banner + '\n');
   console.log(summaryCard + '\n');
 
   if (reportData.daily && reportData.daily.length > 0) {
-    const dailyTable = formatter.renderDailyTable(reportData.daily, currency, reportData);
+    const dailyTable = formatter.renderDailyTable(reportData.daily, currency, reportData, isFree);
     console.log(dailyTable + '\n');
   }
 }
