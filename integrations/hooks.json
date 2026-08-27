@@ -1,14 +1,11 @@
 {
-  "$schema": "https://raw.githubusercontent.com/google-gemini/antigravity/main/schemas/hooks.schema.json",
-  "name": "antigravity-token-tracker-hooks",
-  "version": "1.0.0",
-  "description": "Antigravity lifecycle hook integration for real-time turn & cost status line badge",
-  "hooks": {
-    "PostInvocation": {
-      "enabled": true,
-      "command": "agy-tokens",
-      "args": ["--hook"],
-      "description": "Outputs a 1-line real-time token and cost badge after every turn invocation"
-    }
+  "token-tracker": {
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "agy-tokens --hook",
+        "timeout": 10
+      }
+    ]
   }
 }

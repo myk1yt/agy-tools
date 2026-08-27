@@ -630,6 +630,28 @@ async function runAllTests() {
       assert(badgeStr.includes('⚡ [Antigravity]'));
       assert(badgeStr.includes('Free'));
     });
+
+    await test('Should format hook response matching Antigravity PostInvocation schema', () => {
+      const resp = hookHandler.formatHookResponse('⚡ [Antigravity] Turn: 1.2k | Today: 45k');
+      assert(resp && Array.isArray(resp.injectSteps), 'Must have injectSteps array');
+      assert.strictEqual(resp.injectSteps.length, 1);
+      assert.strictEqual(resp.injectSteps[0].ephemeralMessage, '⚡ [Antigravity] Turn: 1.2k | Today: 45k');
+    });
+
+    await test('handlePostInvocation should return structured payload including injectSteps', async () => {
+      const result = await hookHandler.handlePostInvocation({ currency: 'usd' });
+      assert(typeof result.badge === 'string', 'result.badge must be a string');
+      assert(Array.isArray(result.injectSteps), 'result.injectSteps must be an array');
+      assert.strictEqual(result.injectSteps[0].ephemeralMessage, result.badge);
+      assert(typeof result.turnTokens === 'number');
+      assert(typeof result.todayTokens === 'number');
+    });
+
+    await test('readStdinJson should safely resolve null on TTY or empty input without blocking', async () => {
+      const input = await hookHandler.readStdinJson(10);
+      assert(input === null || typeof input === 'object');
+    });
+
   });
 
   // --- Suite 9: CLI Argument Parsing Unit Tests ---
@@ -685,6 +707,16 @@ async function runAllTests() {
       assert.strictEqual(opts.sessionId, 'abc-123');
     });
 
+    await test('Should parse --raw and --hook flags', () => {
+      const optsHook = parseArgs(['node', 'bin/agy-tokens.js', '--hook']);
+      assert.strictEqual(optsHook.hook, true);
+      assert.strictEqual(optsHook.raw, false);
+
+      const optsRaw = parseArgs(['node', 'bin/agy-tokens.js', '--hook', '--raw']);
+      assert.strictEqual(optsRaw.hook, true);
+      assert.strictEqual(optsRaw.raw, true);
+    });
+
     await test('Should parse pricing catalog subcommands and flags', () => {
       const opts1 = parseArgs(['node', 'bin/agy-tokens.js', 'sync-prices']);
       assert.strictEqual(opts1.sync, true);
@@ -711,6 +743,31 @@ async function runAllTests() {
     await test('Should have valid executable entry files', () => {
       assert(fs.existsSync(path.join(__dirname, '..', 'bin', 'agy-tokens.js')));
       assert(fs.existsSync(path.join(__dirname, '..', 'bin', 'agy-tools.js')));
+    });
+
+    await test('integrations/skills/usage/SKILL.md must start with valid YAML frontmatter', () => {
+      const skillPath = path.join(__dirname, '..', 'integrations', 'skills', 'usage', 'SKILL.md');
+      assert(fs.existsSync(skillPath), 'SKILL.md must exist');
+      const content = fs.readFileSync(skillPath, 'utf8');
+      assert(content.startsWith('---'), 'SKILL.md must start with YAML frontmatter delimiter (---)');
+      const parts = content.split('---');
+      assert(parts.length >= 3, 'Must contain closing YAML delimiter (---)');
+      const frontmatter = parts[1];
+      assert(frontmatter.includes('name: usage'), 'Frontmatter must have name: usage');
+      assert(frontmatter.includes('description:'), 'Frontmatter must have description');
+      assert(content.includes('agy-tokens'), 'SKILL.md instructions must mention agy-tokens');
+    });
+
+    await test('integrations/hooks.json must conform to official Antigravity PostInvocation schema', () => {
+      const hooksPath = path.join(__dirname, '..', 'integrations', 'hooks.json');
+      assert(fs.existsSync(hooksPath), 'integrations/hooks.json must exist');
+      const hooksJson = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+      assert(hooksJson['token-tracker'], 'Must have top-level token-tracker key');
+      assert(Array.isArray(hooksJson['token-tracker'].PostInvocation), 'token-tracker.PostInvocation must be an array');
+      const hookEntry = hooksJson['token-tracker'].PostInvocation[0];
+      assert.strictEqual(hookEntry.type, 'command');
+      assert.strictEqual(hookEntry.command, 'agy-tokens --hook');
+      assert.strictEqual(hookEntry.timeout, 10);
     });
   });
 

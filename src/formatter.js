@@ -655,6 +655,7 @@ function renderHelp() {
     ['--model <name>', t('cliOptModel')],
     ['--free, --no-cost', t('cliOptFree')],
     ['--hook, --badge', t('cliOptHook')],
+    ['--raw', t('cliOptRaw')],
     ['--json', t('cliOptJson')],
     ['--fresh, --no-cache', t('cliOptFresh')],
     ['--prices, --models', t('cliOptPrices')],

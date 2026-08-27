@@ -37,6 +37,7 @@ function parseArgs(argv) {
     lang: null,
     model: null,
     free: false,
+    raw: false,
     json: false,
     hook: false,
     fresh: false,
@@ -96,6 +97,8 @@ function parseArgs(argv) {
       options.model = arg.split('=')[1];
     } else if (arg === '--free' || arg === '--no-cost') {
       options.free = true;
+    } else if (arg === '--raw') {
+      options.raw = true;
     } else if (arg === '--json') {
       options.json = true;
     } else if (arg === '--hook' || arg === '--badge') {
@@ -213,16 +216,22 @@ async function runCli(argv = process.argv) {
 
   // 3. Hook / 1-line badge mode
   if (options.hook) {
+    const stdinContext = await hookHandler.readStdinJson();
     const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
     const result = await hookHandler.handlePostInvocation({
       currency,
       modelName: options.model,
-      isFree
+      isFree,
+      stdinContext
     });
-    if (options.json) {
+
+    if (options.raw) {
+      console.log(result.badge);
+    } else if (options.json) {
       console.log(JSON.stringify(result, null, 2));
     } else {
-      console.log(result.badge);
+      // Default PostInvocation contract for Antigravity hook runner
+      console.log(JSON.stringify(hookHandler.formatHookResponse(result.badge)));
     }
     return;
   }

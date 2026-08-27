@@ -41,7 +41,8 @@ function printToolkitHelp() {
   --lang <en|ko|ja|zh>        Interface language
   --model <name>              Override model pricing
   --free, --no-cost           Display pure token metrics without dollar cost (free subscription)
-  --hook, --badge             1-line real-time badge for lifecycle hooks
+  --hook, --badge             1-line real-time badge for lifecycle hooks (JSON output)
+  --raw                       Print raw badge string without PostInvocation JSON wrapper
   --auto-sync                 Auto-sync pricing if older than 24 hours
   --json                      Raw JSON output
 

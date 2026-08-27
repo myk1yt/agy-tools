@@ -174,9 +174,14 @@ agy-tools dashboard --30d --lang zh
 agy-tools dashboard --today --json
 ```
 
-### 7. Real-Time Hook Badge (1-Line)
+### 7. Real-Time Hook Badge (PostInvocation Contract)
 ```bash
-agy-tools dashboard --hook
+# Official Antigravity PostInvocation hook output (JSON with injectSteps)
+agy-tokens --hook
+# Output: {"injectSteps":[{"ephemeralMessage":"⚡ [Antigravity] Turn: 1.8k ($0.0003) | Today: 64.2k ($0.0096) | Cache: 74%"}]}
+
+# Raw terminal string output (without JSON wrapper)
+agy-tokens --hook --raw
 # Output: ⚡ [Antigravity] Turn: 1.8k ($0.0003) | Today: 64.2k ($0.0096) | Cache: 74%
 ```
 
@@ -196,9 +201,13 @@ agy-tools dashboard --hook
 | `--currency <code>` | | Select display currency (`usd`, `krw`, `jpy`, `eur`, `gbp`) |
 | `--lang <code>` | | Select interface language (`en`, `ko`, `ja`, `zh`) |
 | `--model <name>` | | Override model pricing (`gemini-3.7-flash`, `claude-3.7-sonnet`, etc.) |
-| `--hook`, `--badge` | | Output compact 1-line real-time status badge for lifecycle hooks |
+| `--hook`, `--badge` | | Output JSON matching Antigravity PostInvocation hook contract |
+| `--raw` | | Output raw badge string without PostInvocation JSON wrapper |
 | `--json` | | Output pure JSON for programmatic integration |
 | `--fresh`, `--no-cache` | | Force full re-parsing of transcript files |
+| `--prices`, `--models` | | Display official API pricing catalog table for all `/model` choices |
+| `--sync`, `--sync-prices` | | Synchronize latest official API pricing catalog from remote repo |
+| `--auto-sync` | | Auto-sync pricing if older than 24 hours |
 | `--no-color` | | Disable ANSI terminal colors |
 | `--help` | `-h` | Display help screen |
 | `--version` | `-v` | Display version number |
@@ -224,15 +233,17 @@ Pricing is configured per **1,000,000 tokens (USD)**:
 
 To automatically display a real-time token and cost badge after every turn in Antigravity:
 
-1. Copy [`integrations/hooks.json`](integrations/hooks.json) or add the `PostInvocation` configuration to your Antigravity hooks settings:
+1. Copy [`integrations/hooks.json`](integrations/hooks.json) or add the `PostInvocation` configuration to your `~/.gemini/hooks.json`:
 ```json
 {
-  "hooks": {
-    "PostInvocation": {
-      "enabled": true,
-      "command": "agy-tools",
-      "args": ["dashboard", "--hook"]
-    }
+  "token-tracker": {
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "agy-tokens --hook",
+        "timeout": 10
+      }
+    ]
   }
 }
 ```
