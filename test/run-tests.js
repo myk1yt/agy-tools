@@ -1505,6 +1505,98 @@ async function runAllTests() {
       const htmlAr = htmlReport.renderDashboardHtml(payloadAr, { refreshSec: 5, servePort: 8787 });
       assert(htmlAr.includes('dir="rtl"'), 'RTL dir attribute missing on ar locale HTML tag');
     });
+
+    await test('renderDashboardHtml should use v3.1 layout order: chart panel before cards before filters', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      const chartPos = html.indexOf('id="chartTitle"');
+      const cardsPos = html.indexOf('id="cards"');
+      const filtersPos = html.indexOf('id="filters"');
+      const modelsPos = html.indexOf('id="modelsTitle"');
+      const tablePos = html.indexOf('id="tableTitle"');
+      const emptyPos = html.indexOf('id="empty"');
+
+      assert(chartPos >= 0, 'chartTitle section missing');
+      assert(cardsPos >= 0, 'cards section missing');
+      assert(filtersPos >= 0, 'filters section missing');
+      assert(modelsPos >= 0, 'modelsTitle missing');
+      assert(tablePos >= 0, 'tableTitle missing');
+      assert(emptyPos >= 0, 'empty div missing');
+
+      assert(chartPos < cardsPos, 'chart section must come before cards section');
+      assert(cardsPos < filtersPos, 'cards section must come before filters section');
+      assert(filtersPos < modelsPos, 'filters section must come before models panel');
+      assert(modelsPos < tablePos, 'models section must come before daily table section');
+      assert(tablePos < emptyPos, 'daily table section must come before empty div');
+
+      // Chart legend container present under the chart
+      assert(html.includes('id="chartLegend"'), 'chartLegend container missing');
+      assert(html.includes('chart-legend'), 'chart legend CSS missing');
+
+      // Date filter group must appear before model filter group
+      const dateGroupPos = html.indexOf('id="filterDateLabel"');
+      const modelGroupPos = html.indexOf('id="modelFilters"');
+      assert(dateGroupPos >= 0 && modelGroupPos > dateGroupPos, 'date filter group must precede model filter group');
+    });
+
+    await test('renderDashboardHtml should order date filter buttons today/yesterday/7d/30d/custom with 30d default active', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      const order = ['today', 'yesterday', '7d', '30d', 'custom'];
+      let prevPos = -1;
+      for (const r of order) {
+        const pos = html.indexOf(`data-range="${r}"`);
+        assert(pos >= 0, `data-range="${r}" button missing`);
+        assert(pos > prevPos, `data-range="${r}" must appear after previous button (REQ-234 order)`);
+        prevPos = pos;
+      }
+
+      // Default active remains 30d
+      assert(/data-range="30d"[^>]*class="filter-btn active"/.test(html) ||
+             /class="filter-btn active"[^>]*data-range="30d"/.test(html),
+        '30d button must be the default active button');
+    });
+
+    await test('renderDashboardHtml should include stacked per-model chart JS with legend and custom 5th card logic', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      // Stacked chart: renderSvg consumes dailyModels + per-model color palette
+      assert(/function renderSvg\(daily, dailyModels\)/.test(html), 'renderSvg must accept (daily, dailyModels)');
+      assert(html.includes('dailyModels['), 'renderSvg must index dailyModels per date');
+      assert(html.includes('MODEL_COLORS'), 'per-model color palette missing');
+      assert(html.includes('modelColor('), 'modelColor helper missing');
+      assert(html.includes("function renderChart("), 'renderChart wrapper missing');
+      assert(html.includes("getElementById('chartLegend')"), 'legend rendering missing in client JS');
+      assert(html.includes('legend-swatch'), 'legend swatch CSS/JS missing');
+
+      // Chart re-renders on model filter change (renderChart called in model checkbox handler)
+      assert(/renderChart\(lastPayload\);\s*\n\s*applyFilters\(\);/.test(html),
+        'model filter change must re-render chart via renderChart');
+
+      // Summary cards: always 4 full-data cards from p.summaries
+      assert(html.includes("cardHtml(I18N.summaryToday, s.today)"), 'today card missing in render()');
+      assert(html.includes("cardHtml(I18N.summaryYesterday, s.yesterday)"), 'yesterday card missing in render()');
+      assert(html.includes("cardHtml(I18N.summary7d, s.last7d)"), '7d card missing in render()');
+      assert(html.includes("cardHtml(I18N.summary30d, s.last30d)"), '30d card missing in render()');
+
+      // Custom 5th card: appended only when range is custom with from/to set
+      assert(html.includes("filterState.range === 'custom' && filterState.from && filterState.to"),
+        'custom 5th card condition missing');
+      assert(html.includes("cardHtml(I18N.filterCustom || 'Custom', filtered.summary)"),
+        'custom 5th card must use filtered.summary');
+
+      // applyFilters must NOT touch the chart (chart is date-filter independent)
+      const applyFn = html.match(/function applyFilters\(\) \{[\s\S]*?\n  \}/);
+      assert(applyFn, 'applyFilters function not found');
+      assert(!applyFn[0].includes("getElementById('chart')"),
+        'applyFilters must not re-render the chart (chart ignores date filter)');
+
+      // applyFilters must always render the 4 fixed cards from p.summaries
+      assert(applyFn[0].includes('lastPayload.summaries'), 'applyFilters must render cards from full-data summaries');
+    });
   });
 
   // --- Suite 16: OSC 8 & New CLI Flags Unit Tests ---

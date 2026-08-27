@@ -471,27 +471,73 @@ function renderDashboardHtml(payload, opts = {}) {
     "      '</div>';",
     "  }",
     "",
-    "  function renderSvg(daily) {",
+    "  var MODEL_COLORS = ['#58a6ff','#3fb950','#f778ba','#d29922','#a371f7','#ff7b72','#79c0ff','#56d364','#e3b341','#8b949e'];",
+    "  function modelColor(name) {",
+    "    var idx = allModels.indexOf(name);",
+    "    if (idx < 0) idx = 0;",
+    "    return MODEL_COLORS[idx % MODEL_COLORS.length];",
+    "  }",
+    "  function renderSvg(daily, dailyModels) {",
     "    var W = 760, H = 200, PAD_L = 8, PAD_B = 22, PAD_T = 8;",
     "    var n = daily.length || 1;",
+    "    var dm = dailyModels || {};",
+    "    var ordered = [];",
+    "    var mi;",
+    "    for (mi = 0; mi < allModels.length; mi++) {",
+    "      if (filterState.models.has(allModels[mi])) ordered.push(allModels[mi]);",
+    "    }",
     "    var max = 0, i;",
-    "    for (i = 0; i < daily.length; i++) { if (daily[i].totalTokens > max) max = daily[i].totalTokens; }",
+    "    var stacks = [];",
+    "    for (i = 0; i < daily.length; i++) {",
+    "      var dateModels = dm[daily[i].date] || {};",
+    "      var segs = [], dayTotal = 0;",
+    "      for (mi = 0; mi < ordered.length; mi++) {",
+    "        var mr = dateModels[ordered[mi]];",
+    "        var tok = mr ? (mr.totalTokens || 0) : 0;",
+    "        if (tok > 0) { segs.push({ name: ordered[mi], tokens: tok, cost: mr.costUsd || 0 }); dayTotal += tok; }",
+    "      }",
+    "      if (dayTotal > max) max = dayTotal;",
+    "      stacks.push({ date: daily[i].date, segs: segs, total: dayTotal });",
+    "    }",
     "    if (max <= 0) max = 1;",
+    "    var innerH = H - PAD_B - PAD_T;",
     "    var bw = (W - PAD_L * 2) / n;",
     "    var bars = '';",
-    "    for (i = 0; i < daily.length; i++) {",
-    "      var d = daily[i];",
-    "      var h = Math.max(d.totalTokens > 0 ? 3 : 1, Math.round((d.totalTokens / max) * (H - PAD_B - PAD_T)));",
+    "    for (i = 0; i < stacks.length; i++) {",
+    "      var st = stacks[i];",
     "      var x = PAD_L + i * bw;",
-    "      var y = H - PAD_B - h;",
-    "      bars += '<rect x=\"' + x.toFixed(1) + '\" y=\"' + y + '\" width=\"' + Math.max(1, bw - 2).toFixed(1) +",
-    "        '\" height=\"' + h + '\" rx=\"2\" class=\"bar' + (i === daily.length - 1 ? ' bar-today' : '') + '\">' +",
-    "        '<title>' + esc(d.date + ' \\u00b7 ' + fmtCompact(d.totalTokens) + ' \\u00b7 ' + fmtCost(d.costUsd)) + '</title></rect>';",
-    "      if (i % 5 === 0 || i === daily.length - 1) {",
-    "        bars += '<text x=\"' + (x + bw / 2).toFixed(1) + '\" y=\"' + (H - 6) + '\" class=\"axis\">' + esc(d.date.slice(5)) + '</text>';",
+    "      var hTotal = st.total > 0 ? Math.max(3, Math.round((st.total / max) * innerH)) : 1;",
+    "      if (st.segs.length === 0) {",
+    "        bars += '<rect x=\"' + x.toFixed(1) + '\" y=\"' + (H - PAD_B - 1) + '\" width=\"' + Math.max(1, bw - 2).toFixed(1) + '\" height=\"1\" class=\"bar\"/>';",
+    "      }",
+    "      var yCursor = H - PAD_B;",
+    "      for (var sj = 0; sj < st.segs.length; sj++) {",
+    "        var seg = st.segs[sj];",
+    "        var segH = Math.max(1, Math.round((seg.tokens / st.total) * hTotal));",
+    "        yCursor -= segH;",
+    "        bars += '<rect x=\"' + x.toFixed(1) + '\" y=\"' + yCursor + '\" width=\"' + Math.max(1, bw - 2).toFixed(1) +",
+    "          '\" height=\"' + segH + '\" rx=\"1\" fill=\"' + modelColor(seg.name) + '\">' +",
+    "          '<title>' + esc(st.date + ' \\u00b7 ' + seg.name + ' \\u00b7 ' + fmtCompact(seg.tokens) + ' \\u00b7 ' + fmtCost(seg.cost)) + '</title></rect>';",
+    "      }",
+    "      if (i % 5 === 0 || i === stacks.length - 1) {",
+    "        bars += '<text x=\"' + (x + bw / 2).toFixed(1) + '\" y=\"' + (H - 6) + '\" class=\"axis\">' + esc(daily[i].date.slice(5)) + '</text>';",
     "      }",
     "    }",
     "    return '<svg viewBox=\"0 0 ' + W + ' ' + H + '\" preserveAspectRatio=\"none\" role=\"img\">' + bars + '</svg>';",
+    "  }",
+    "",
+    "  function renderChart(p) {",
+    "    var chartEl = document.getElementById('chart');",
+    "    if (chartEl) chartEl.innerHTML = renderSvg((p && p.daily) || [], p ? p.dailyModels : null);",
+    "    var legend = document.getElementById('chartLegend');",
+    "    if (legend) {",
+    "      var lhtml = '';",
+    "      for (var li = 0; li < allModels.length; li++) {",
+    "        if (!filterState.models.has(allModels[li])) continue;",
+    "        lhtml += '<span class=\"legend-item\"><span class=\"legend-swatch\" style=\"background:' + modelColor(allModels[li]) + '\"></span>' + esc(allModels[li]) + '</span>';",
+    "      }",
+    "      legend.innerHTML = lhtml;",
+    "    }",
     "  }",
     "",
     "  function renderTable(daily) {",
@@ -578,12 +624,15 @@ function renderDashboardHtml(payload, opts = {}) {
     "    } else if (range === '30d') {",
     "      startIdx = 0;",
     "    } else if (range === 'custom' && filterState.from && filterState.to) {",
+    "      startIdx = daily.length;",
+    "      endIdx = 0;",
     "      for (var i = 0; i < daily.length; i++) {",
     "        if (daily[i].date >= filterState.from) { startIdx = i; break; }",
     "      }",
     "      for (var j = daily.length - 1; j >= 0; j--) {",
     "        if (daily[j].date <= filterState.to) { endIdx = j + 1; break; }",
     "      }",
+    "      if (startIdx >= endIdx) { startIdx = 0; endIdx = 0; }",
     "    }",
     "    var slicedDaily = daily.slice(startIdx, endIdx);",
     "    var slicedDates = slicedDaily.map(function(d) { return d.date; });",
@@ -667,13 +716,14 @@ function renderDashboardHtml(payload, opts = {}) {
     "    if (!lastPayload) return;",
     "    var filtered = getFilteredData(lastPayload);",
     "    if (!filtered) return;",
-    "    document.getElementById('chart').innerHTML = renderSvg(filtered.daily);",
     "    document.getElementById('tableWrap').innerHTML = renderTable(filtered.daily);",
     "    renderModels(filtered.models);",
-    "    var s = filtered.summary;",
-    "    var rangeLabels = { '30d': (I18N.filter30d || I18N.summary30d), '7d': (I18N.filter7d || I18N.summary7d), 'today': (I18N.filterToday || I18N.summaryToday), 'yesterday': (I18N.filterYesterday || I18N.summaryYesterday), 'custom': (I18N.filterCustom || 'Custom') };",
-    "    var label = rangeLabels[filterState.range] || I18N.filter30d || I18N.summary30d;",
-    "    var cards = cardHtml(label, s);",
+    "    var s = lastPayload.summaries || {};",
+    "    var cards = cardHtml(I18N.summaryToday, s.today) + cardHtml(I18N.summaryYesterday, s.yesterday) +",
+    "      cardHtml(I18N.summary7d, s.last7d) + cardHtml(I18N.summary30d, s.last30d);",
+    "    if (filterState.range === 'custom' && filterState.from && filterState.to) {",
+    "      cards += cardHtml(I18N.filterCustom || 'Custom', filtered.summary);",
+    "    }",
     "    document.getElementById('cards').innerHTML = cards;",
     "  }",
     "",
@@ -688,7 +738,7 @@ function renderDashboardHtml(payload, opts = {}) {
     "        this.classList.add('active');",
     "        var customEl = document.getElementById('customDateRange');",
     "        if (customEl) customEl.style.display = range === 'custom' ? 'inline' : 'none';",
-    "        if (range !== 'custom') applyFilters();",
+    "        applyFilters();",
     "      });",
     "    }",
     "    var fromEl = document.getElementById('filterFrom');",
@@ -725,6 +775,7 @@ function renderDashboardHtml(payload, opts = {}) {
     "        var allCb = wrap.querySelector('input[data-model=\"*\"]');",
     "        if (allCb) allCb.checked = filterState.models.size === allModels.length;",
     "      }",
+    "      renderChart(lastPayload);",
     "      applyFilters();",
     "    });",
     "  }",
@@ -732,24 +783,25 @@ function renderDashboardHtml(payload, opts = {}) {
     "  function render(p) {",
     "    if (!p) return;",
     "    updateI18N(p);",
+    "    initFilters(p);",
     "    var s = p.summaries || {};",
     "    var cards = cardHtml(I18N.summaryToday, s.today) + cardHtml(I18N.summaryYesterday, s.yesterday) +",
     "      cardHtml(I18N.summary7d, s.last7d) + cardHtml(I18N.summary30d, s.last30d);",
     "    document.getElementById('cards').innerHTML = cards;",
-    "    var daily = p.daily || [];",
-    "    document.getElementById('chart').innerHTML = renderSvg(daily);",
-    "    document.getElementById('tableWrap').innerHTML = renderTable(daily);",
-    "    renderModels(p.models);",
+    "    renderChart(p);",
+    "    var filtersActive = filterState.range !== '30d' || (allModels.length > 0 && filterState.models.size !== allModels.length);",
+    "    if (filtersActive) {",
+    "      applyFilters();",
+    "    } else {",
+    "      document.getElementById('tableWrap').innerHTML = renderTable(p.daily || []);",
+    "      renderModels(p.models);",
+    "    }",
     "    var empty = (!s.last30d || s.last30d.totalTokens === 0) && (!s.today || s.today.totalTokens === 0);",
     "    document.getElementById('empty').style.display = empty ? 'block' : 'none';",
     "    var lu = document.getElementById('lastUpdated');",
     "    if (lu) lu.textContent = I18N.lastUpdated.replace('{time}', new Date(p.generatedAt).toLocaleString());",
     "    var model = document.getElementById('model');",
     "    if (model) model.textContent = p.model || '';",
-    "    initFilters(p);",
-    "    if (filterState.range !== '30d' || (allModels.length > 0 && filterState.models.size !== allModels.length)) {",
-    "      applyFilters();",
-    "    }",
     "  }",
     "",
     "  function setLive(on) {",
@@ -818,8 +870,10 @@ h1{font-size:20px}
 .panel h2{font-size:14px;color:var(--dim);margin-bottom:12px;font-weight:600}
 svg{width:100%;height:auto;display:block}
 .bar{fill:var(--accent);opacity:.85}
-.bar-today{fill:var(--green)}
 .axis{fill:var(--dim);font-size:10px;text-anchor:middle}
+.chart-legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:11px;color:var(--dim)}
+.legend-item{display:flex;align-items:center;gap:5px}
+.legend-swatch{display:inline-block;width:10px;height:10px;border-radius:2px;flex-shrink:0}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
 th:first-child,td:first-child{text-align:left}
@@ -849,14 +903,15 @@ td.strong{font-weight:600}
   <div class="meta"><span id="model"></span><span id="live" class="live"></span><span id="lastUpdated"></span></div>
 </header>
 <main>
+  <section class="panel"><h2 id="chartTitle">${t('chartTitle', {}, lang)}</h2><div id="chart"></div><div id="chartLegend" class="chart-legend"></div></section>
   <section id="cards" class="cards"></section>
   <section id="filters" class="filters">
     <div class="filter-group">
       <span class="filter-group-label" id="filterDateLabel">${t('filterDate', {}, lang)}</span>
-      <button class="filter-btn active" data-range="30d">${t('filter30d', {}, lang)}</button>
-      <button class="filter-btn" data-range="7d">${t('filter7d', {}, lang)}</button>
       <button class="filter-btn" data-range="today">${t('filterToday', {}, lang)}</button>
       <button class="filter-btn" data-range="yesterday">${t('filterYesterday', {}, lang)}</button>
+      <button class="filter-btn" data-range="7d">${t('filter7d', {}, lang)}</button>
+      <button class="filter-btn active" data-range="30d">${t('filter30d', {}, lang)}</button>
       <button class="filter-btn" data-range="custom">${t('filterCustom', {}, lang)}</button>
       <span id="customDateRange" style="display:none">
         <input type="date" class="filter-date-input" id="filterFrom">
@@ -869,7 +924,6 @@ td.strong{font-weight:600}
       <!-- model checkboxes populated by JS -->
     </div>
   </section>
-  <section class="panel"><h2 id="chartTitle">${t('chartTitle', {}, lang)}</h2><div id="chart"></div></section>
   <section class="panel"><h2 id="modelsTitle">${t('modelsTitle', {}, lang)}</h2><div id="modelsWrap"></div></section>
   <section class="panel"><h2 id="tableTitle">${t('tableTitle', {}, lang)}</h2><div id="tableWrap"></div></section>
   <div id="empty">${t('noDataFound', {}, lang)}</div>

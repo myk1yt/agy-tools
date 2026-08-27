@@ -42,6 +42,17 @@
 - [ ] [REQ-227] `node bin/agy-tokens.js --hook --raw` → badge still works (single line, OSC 8 link).
 - [ ] [REQ-228] VP commits + pushes after all gates pass.
 
+### v3.1 Follow-up: Filter Bug Fix + Layout Redesign (user feedback 260827)
+
+- [ ] [REQ-230] BUG: Date filter buttons other than 30d (Today/Yesterday/7d/Custom) must correctly filter the Daily Detail table and Models table. Root cause must be identified and fixed.
+- [ ] [REQ-231] Layout reorder (top to bottom): (1) Token Usage Trend chart, (2) Summary cards (Today/Yesterday/7d/30d), (3) Date filter, (4) Model filter, (5) Models Usage & Cost, (6) Daily Detail.
+- [ ] [REQ-232] Token Usage Trend chart: always shows full 30 days (NOT affected by date filter), but DOES reflect model filter (stacked bars per model contribution).
+- [ ] [REQ-233] Summary cards (Today/Yesterday/7d/30d) always computed from FULL data — never affected by any filter. When Custom date range is selected, a 5th card appears to the right of the 30d card showing custom-range tokens + cost.
+- [ ] [REQ-234] Date filter button order: Today → Yesterday → 7d → 30d → Custom.
+- [ ] [REQ-235] Models table + Daily Detail table respond to BOTH date filter and model filter.
+- [ ] [REQ-236] Stacked bar chart: each day's bar segmented by model contribution (colors per model, legend shown).
+- [ ] [REQ-237] All tests still pass; suite 15 updated for new layout/filter behavior.
+
 ### Hard Constraints (unchanged from v2)
 
 - Zero new npm dependencies (Node core only).
