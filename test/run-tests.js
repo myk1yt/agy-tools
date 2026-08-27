@@ -343,6 +343,27 @@ async function runAllTests() {
       }
     });
 
+    await test('Should verify estimate-panel keys across all 21 supported locales (REQ-250..253, 259)', () => {
+      const estimateKeys = [
+        'estimateDisclaimer', 'estimatePanelTitle', 'estimateMonthToDate',
+        'estimateDailyAverage', 'estimateMonthEnd', 'estimateLast30d'
+      ];
+
+      assert(i18n.SUPPORTED_LOCALES.length >= 21, `Expected at least 21 supported locales, got ${i18n.SUPPORTED_LOCALES.length}`);
+      for (const lang of i18n.SUPPORTED_LOCALES) {
+        const dict = i18n.TRANSLATIONS[lang];
+        for (const ek of estimateKeys) {
+          assert(typeof dict[ek] === 'string' && dict[ek].length > 0, `Estimate key "${ek}" missing or empty in "${lang}"`);
+        }
+      }
+      // Canonical spot-checks (REQ-250 Korean disclaimer text + en reference)
+      assert.strictEqual(i18n.TRANSLATIONS.ko.estimateDisclaimer, '이 수치들은 장기 사용 관리를 위한 추정치입니다');
+      assert.strictEqual(i18n.TRANSLATIONS.en.estimatePanelTitle, 'Long-Term Usage Estimate');
+      // RTL locales keep natural translations (REQ-259)
+      assert(i18n.TRANSLATIONS.ar.estimateDisclaimer.length > 0);
+      assert(i18n.TRANSLATIONS.he.estimateDisclaimer.length > 0);
+    });
+
     await test('Should correctly detect and handle RTL locales', () => {
       assert(Array.isArray(i18n.RTL_LOCALES), 'RTL_LOCALES must be an array');
       assert(i18n.RTL_LOCALES.includes('ar'), 'ar must be in RTL_LOCALES');
@@ -483,6 +504,149 @@ async function runAllTests() {
 
       assert.strictEqual(parsed.turnCount, 0);
       assert.strictEqual(parsed.totalTokens, 0);
+    });
+
+    await test('Should extract effort-suffixed model from USER_SETTINGS_CHANGE blocks (REQ-254)', async () => {
+      const settingsFile = path.join(tempDir, 'settings-change.jsonl');
+      const lines = [
+        JSON.stringify({
+          step_index: 0,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:00:00Z',
+          content: '<USER_SETTINGS_CHANGE>\nchanged setting `Model Selection` from None to Gemini 3.7 Flash (High)\n</USER_SETTINGS_CHANGE>'
+        }),
+        JSON.stringify({
+          step_index: 1,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:00:05Z',
+          content: 'Working on the task.'
+        })
+      ];
+      fs.writeFileSync(settingsFile, lines.join('\n'), 'utf8');
+
+      const parsed = await logParser.parseTranscriptFile(
+        settingsFile,
+        'settings-session-001',
+        { title: 'Settings Change' },
+        'gemini-3.7-flash'
+      );
+
+      // Session model must be the effort-suffixed display string from the
+      // LAST settings-change block, not the param fallback.
+      assert.strictEqual(parsed.modelName, 'Gemini 3.7 Flash (High)');
+      assert.strictEqual(parsed.turnCount, 2);
+      assert(parsed.costUsd > 0, 'Session cost must still be computed');
+    });
+
+    await test('Should fall back to param model when no USER_SETTINGS_CHANGE present (REQ-254)', async () => {
+      const noSettingsFile = path.join(tempDir, 'no-settings-change.jsonl');
+      const lines = [
+        JSON.stringify({
+          step_index: 0,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:00:00Z',
+          content: 'Plain prompt with no settings block.'
+        }),
+        JSON.stringify({
+          step_index: 1,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:00:05Z',
+          content: 'Response without settings changes.'
+        })
+      ];
+      fs.writeFileSync(noSettingsFile, lines.join('\n'), 'utf8');
+
+      const parsed = await logParser.parseTranscriptFile(
+        noSettingsFile,
+        'no-settings-session',
+        { title: 'No Settings' },
+        'gemini-3.7-flash'
+      );
+
+      assert.strictEqual(parsed.modelName, 'gemini-3.7-flash');
+    });
+
+    await test('Should use the LAST settings-change when multiple blocks exist (REQ-254)', async () => {
+      const multiFile = path.join(tempDir, 'multi-settings-change.jsonl');
+      const lines = [
+        JSON.stringify({
+          step_index: 0,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:00:00Z',
+          content: '<USER_SETTINGS_CHANGE>\nchanged setting `Model Selection` from None to Gemini 3.7 Flash (High)\n</USER_SETTINGS_CHANGE>'
+        }),
+        JSON.stringify({
+          step_index: 1,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:00:05Z',
+          content: 'First phase done.'
+        }),
+        JSON.stringify({
+          step_index: 2,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:01:00Z',
+          content: '<USER_SETTINGS_CHANGE>\nchanged setting `Model Selection` from Gemini 3.7 Flash (High) to Claude Opus 4.6 (Thinking)\n</USER_SETTINGS_CHANGE>'
+        }),
+        JSON.stringify({
+          step_index: 3,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:01:05Z',
+          content: 'Second phase done.'
+        })
+      ];
+      fs.writeFileSync(multiFile, lines.join('\n'), 'utf8');
+
+      const parsed = await logParser.parseTranscriptFile(
+        multiFile,
+        'multi-settings-session',
+        { title: 'Multi Settings' },
+        'gemini-3.7-flash'
+      );
+
+      assert.strictEqual(parsed.modelName, 'Claude Opus 4.6 (Thinking)');
+    });
+
+    await test('Should sanitize trailing boilerplate from settings-change model name (REQ-255)', async () => {
+      const pollutedFile = path.join(tempDir, 'polluted-settings-change.jsonl');
+      const lines = [
+        JSON.stringify({
+          step_index: 0,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:00:00Z',
+          content: '<USER_SETTINGS_CHANGE>\nchanged setting `Model Selection` from None to Claude Opus 4.6 (Thinking). No need to comment on this change.\n</USER_SETTINGS_CHANGE>'
+        }),
+        JSON.stringify({
+          step_index: 1,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:00:05Z',
+          content: 'Working on the task.'
+        })
+      ];
+      fs.writeFileSync(pollutedFile, lines.join('\n'), 'utf8');
+
+      const parsed = await logParser.parseTranscriptFile(
+        pollutedFile,
+        'polluted-settings-session',
+        { title: 'Polluted Settings' },
+        'gemini-3.7-flash'
+      );
+
+      // Live transcripts append prompt boilerplate after the model name on
+      // the same line; the captured identity must be the clean display
+      // string with no prose suffix (REQ-255).
+      assert.strictEqual(parsed.modelName, 'Claude Opus 4.6 (Thinking)');
+      assert(!parsed.modelName.includes('. No need'), 'Model name must not contain boilerplate');
+      assert(!parsed.modelName.includes('No need to comment'), 'Model name must not contain prose suffix');
     });
 
     // Cleanup temp directory
@@ -1666,6 +1830,151 @@ async function runAllTests() {
 
       // applyFilters must always render the 4 fixed cards from p.summaries
       assert(applyFn[0].includes('lastPayload.summaries'), 'applyFilters must render cards from full-data summaries');
+    });
+
+    await test('renderDashboardHtml should include estimate panel markup, CSS, and client JS (REQ-250..253)', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      // Panel + disclaimer markup (header note + panel footer)
+      assert(html.includes('id="estimateNote"'), 'header estimateNote span missing');
+      assert(html.includes('id="estimatePanel"'), 'estimatePanel section missing');
+      assert(html.includes('id="estimateTitle"'), 'estimateTitle h2 missing');
+      assert(html.includes('id="estimatePanelNote"'), 'estimatePanelNote footer missing');
+      assert(html.includes('class="estimate-note"'), 'estimate-note class missing on disclaimer nodes');
+
+      // 4 metric items: label/value/cost node ids
+      const estIds = [
+        'estMtdLabel', 'estMtdValue', 'estMtdCost',
+        'estAvgLabel', 'estAvgValue', 'estAvgCost',
+        'estMonthEndLabel', 'estMonthEndValue', 'estMonthEndCost',
+        'est30dLabel', 'est30dValue', 'est30dCost'
+      ];
+      for (const id of estIds) {
+        assert(html.includes(`id="${id}"`), `estimate node id="${id}" missing`);
+      }
+
+      // CSS: note, panel, grid, layout wrapper + 2-col media query
+      assert(html.includes('.estimate-note{'), 'estimate-note CSS missing');
+      assert(html.includes('.estimate-panel{'), 'estimate-panel CSS missing');
+      assert(html.includes('.est-grid{'), 'est-grid CSS missing');
+      assert(html.includes('.est-item{'), 'est-item CSS missing');
+      assert(html.includes('.est-layout{'), 'est-layout CSS missing');
+      assert(html.includes('@media(min-width:1200px){.est-layout{grid-template-columns:1.6fr 1fr}}'),
+        '2-col est-layout media query missing');
+      // RTL-safe: grid layout uses direction-agnostic columns (no [dir=rtl] mirror needed)
+      assert(html.includes('est-layout'), 'est-layout wrapper must exist for RTL-safe grid');
+
+      // Client JS: computation + render functions wired into updateI18N and render()
+      assert(html.includes('function computeEstimates('), 'computeEstimates missing in client JS');
+      assert(html.includes('function renderEstimates('), 'renderEstimates missing in client JS');
+      assert(html.includes('renderEstimates(lastPayload)'), 'updateI18N must re-render estimates on locale change');
+      assert(/render\(p\) \{[\s\S]*?renderEstimates\(p\);/.test(html), 'render() must call renderEstimates(p)');
+
+      // Computation guards: month-prefix match, 7d slice, divide-by-zero guard
+      assert(html.includes("indexOf(monthPrefix) === 0"), 'MTD month-prefix match missing');
+      assert(html.includes('rows.slice(-7)'), '7d window slice missing');
+      assert(html.includes('rows.length > 0 ?'), 'divide-by-zero guard missing');
+      assert(html.includes('new Date(y, m + 1, 0).getDate()'), 'days-in-month computation missing');
+
+      // est-layout wrapper wraps cards + estimate panel (panel after cards)
+      const cardsPos = html.indexOf('id="cards"');
+      const panelPos = html.indexOf('id="estimatePanel"');
+      const layoutPos = html.indexOf('class="est-layout"');
+      assert(layoutPos >= 0 && layoutPos < cardsPos && cardsPos < panelPos,
+        'est-layout must wrap #cards then #estimatePanel');
+    });
+
+    await test('renderDashboardHtml should render disclaimer text and activeModel label logic (REQ-250, 258)', () => {
+      const payloadKo = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'ko', model: 'Gemini 3.7 Flash (High)' });
+      const htmlKo = htmlReport.renderDashboardHtml(payloadKo, { refreshSec: 5, servePort: 8787 });
+
+      // Korean disclaimer text present in both header note and panel footer
+      assert(htmlKo.includes('이 수치들은 장기 사용 관리를 위한 추정치입니다'),
+        'Korean estimateDisclaimer text missing in rendered HTML');
+      assert(htmlKo.includes('장기 사용량 추정'), 'Korean estimatePanelTitle missing');
+
+      // activeModel label logic in updateI18N + render()
+      assert(htmlKo.includes("I18N.activeModel + ': ' + (lastPayload.model || '')"),
+        'updateI18N must render #model with activeModel prefix');
+      assert(htmlKo.includes("(I18N.activeModel ? I18N.activeModel + ': ' : '') + (p.model || '')"),
+        'render() must render #model with activeModel prefix');
+      assert(htmlKo.includes("document.getElementById('model')"), '#model span render missing');
+
+      // updateI18N covers all new node ids (REQ-259)
+      for (const nid of ['estimateNote', 'estimateTitle', 'estimatePanelNote', 'estMtdLabel', 'estAvgLabel', 'estMonthEndLabel', 'est30dLabel']) {
+        assert(htmlKo.includes(`getElementById('${nid}')`), `updateI18N must cover #${nid}`);
+      }
+
+      // RTL variant keeps dir attribute + Arabic disclaimer
+      const payloadAr = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'ar' });
+      const htmlAr = htmlReport.renderDashboardHtml(payloadAr, { refreshSec: 5, servePort: 8787 });
+      assert(htmlAr.includes('dir="rtl"'), 'RTL dir attribute missing for ar');
+      assert(htmlAr.includes('هذه الأرقام تقديرية لإدارة الاستخدام على المدى الطويل'),
+        'Arabic estimateDisclaimer text missing');
+    });
+
+    await test('buildDashboardPayload should keep effort variants distinct but costed at base-model rates (REQ-255, 256)', () => {
+      const now = new Date().toISOString();
+      const sessions = [
+        {
+          sessionId: 'eff-high',
+          modelName: 'Gemini 3.7 Flash (High)',
+          startTime: now,
+          inputTokens: 1000,
+          cachedTokens: 500,
+          outputTokens: 200,
+          turns: [
+            { createdAt: now, inputTokens: 1000, cachedTokens: 500, outputTokens: 200 }
+          ]
+        },
+        {
+          sessionId: 'eff-low',
+          modelName: 'Gemini 3.7 Flash (Low)',
+          startTime: now,
+          inputTokens: 300,
+          cachedTokens: 100,
+          outputTokens: 50,
+          turns: [
+            { createdAt: now, inputTokens: 300, cachedTokens: 100, outputTokens: 50 }
+          ]
+        }
+      ];
+      const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en' });
+
+      // models[]: 2 distinct effort-variant rows with full display names
+      assert(Array.isArray(payload.models) && payload.models.length === 2,
+        `expected 2 distinct effort-variant model rows, got ${payload.models.length}`);
+      const byModel = {};
+      for (const m of payload.models) byModel[m.model] = m;
+      const high = byModel['Gemini 3.7 Flash (High)'];
+      const low = byModel['Gemini 3.7 Flash (Low)'];
+      assert(high, 'effort-variant (High) row missing');
+      assert(low, 'effort-variant (Low) row missing');
+      assert.strictEqual(high.displayName, 'Gemini 3.7 Flash (High)');
+      assert.strictEqual(low.displayName, 'Gemini 3.7 Flash (Low)');
+
+      // dailyModels keys distinct per variant
+      const todayStr = aggregator.formatLocalDate(new Date());
+      assert(payload.dailyModels[todayStr], 'dailyModels today missing');
+      assert(payload.dailyModels[todayStr]['Gemini 3.7 Flash (High)'], 'dailyModels (High) key missing');
+      assert(payload.dailyModels[todayStr]['Gemini 3.7 Flash (Low)'], 'dailyModels (Low) key missing');
+
+      // Both variants costed at BASE-model rates (REQ-256): the suffixed name
+      // must resolve to the same pricing as the bare base model.
+      assert(high.costUsd > 0 && low.costUsd > 0, 'both variants must be costed');
+      const baseHigh = config.calculateCostUsd(1000, 500, 200, 'Gemini 3.7 Flash');
+      const baseLow = config.calculateCostUsd(300, 100, 50, 'Gemini 3.7 Flash');
+      // Payload costs are round6()'d, so compare within half-ULP of 1e-6.
+      assert(Math.abs(high.costUsd - baseHigh) < 5e-7,
+        `(High) variant must be costed at base-model rates: ${high.costUsd} vs ${baseHigh}`);
+      assert(Math.abs(low.costUsd - baseLow) < 5e-7,
+        `(Low) variant must be costed at base-model rates: ${low.costUsd} vs ${baseLow}`);
+      // dailyModels rows are costed with the suffixed key too — same base rates
+      const dmHigh = payload.dailyModels[todayStr]['Gemini 3.7 Flash (High)'];
+      const dmLow = payload.dailyModels[todayStr]['Gemini 3.7 Flash (Low)'];
+      assert(Math.abs(dmHigh.costUsd - baseHigh) < 5e-7, 'dailyModels (High) must use base-model rates');
+      assert(Math.abs(dmLow.costUsd - baseLow) < 5e-7, 'dailyModels (Low) must use base-model rates');
     });
   });
 

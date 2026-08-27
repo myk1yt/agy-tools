@@ -8,7 +8,10 @@ const path = require('path');
 const { CACHE_FILE, BRAIN_DIR, HISTORY_FILE, getActiveModelFromSettings } = require('./config');
 const { discoverSessions, parseTranscriptFile, loadHistoryIndex } = require('./log-parser');
 
-const CACHE_SCHEMA_VERSION = 1;
+// v3 (Batch 3.5, REQ-255): log-parser now sanitizes settings-change model
+// names; bumping invalidates schema-2 caches whose stored identities were
+// captured with trailing prompt boilerplate.
+const CACHE_SCHEMA_VERSION = 3;
 
 /**
  * Loads the current tracker cache from disk.

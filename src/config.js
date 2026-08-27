@@ -429,6 +429,22 @@ function getActiveModelFromSettings() {
 }
 
 /**
+ * Strips ONE trailing parenthesized group (e.g. reasoning-effort suffix) from a
+ * model display name so pricing resolves on the base model.
+ *   "Gemini 3.7 Flash (Low)"     -> "Gemini 3.7 Flash"
+ *   "Claude Opus 4.6 (Thinking)" -> "Claude Opus 4.6"
+ *   "gemini-3.7-flash"           -> "gemini-3.7-flash" (no parens -> unchanged)
+ * Null/non-string values pass through untouched; if stripping would yield an
+ * empty string (e.g. "(High)"), the original input is returned.
+ * @param {string} [modelName] - Model display name, possibly effort-suffixed.
+ * @returns {string} Base model name without the trailing parenthesized group.
+ */
+function getBaseModelName(modelName) {
+  if (!modelName || typeof modelName !== 'string') return modelName;
+  return modelName.replace(/\s*\([^)]*\)\s*$/, '').trim() || modelName;
+}
+
+/**
  * Resolves pricing structure for a given model string or alias.
  * Checks registered MODEL_PRICING (including synced rates and user overrides) first,
  * then falls back to smart fuzzy heuristic resolution.
@@ -438,7 +454,7 @@ function getActiveModelFromSettings() {
 function getModelPricing(modelName) {
   loadUserConfig();
 
-  const rawTarget = modelName || getActiveModelFromSettings();
+  const rawTarget = getBaseModelName(modelName) || getActiveModelFromSettings();
   const target = (rawTarget || '').toLowerCase().trim();
 
   // 1. Exact key match in MODEL_PRICING
@@ -679,6 +695,7 @@ module.exports = {
   formatModelDisplayName,
   smartHeuristicPricing,
   getActiveModelFromSettings,
+  getBaseModelName,
   getModelPricing,
   mergePricingDict,
   loadUserConfig,

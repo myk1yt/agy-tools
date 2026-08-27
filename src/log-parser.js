@@ -11,6 +11,32 @@ const { BRAIN_DIR, HISTORY_FILE, getActiveModelFromSettings, calculateCostUsd, c
 const { estimateTokens, estimateMessageTokens } = require('./tokenizer');
 
 /**
+ * Marker that opens a settings-change block inside a USER_INPUT turn's content.
+ * Used as a cheap substring pre-filter before running the costlier regex (AD-2).
+ * @type {string}
+ */
+const SETTINGS_CHANGE_MARKER = '<USER_SETTINGS_CHANGE>';
+
+/**
+ * Matches the model-selection line inside a <USER_SETTINGS_CHANGE> block.
+ * Verified live-log format:
+ *   "changed setting `Model Selection` from None to Gemini 3.7 Flash (High)"
+ * Live transcripts may append prompt boilerplate after the model name on the
+ * same line (e.g. "Claude Opus 4.6 (Thinking). No need to comment on this
+ * change."), so capture group 1 stops at the first sentence boundary: any
+ * sentence punctuation (. ! ? ; : , and CJK/fullwidth equivalents) followed
+ * by whitespace or end-of-string, a newline, a backtick, "<", or an em/en
+ * dash. Model display names never contain those sequences inside (dots in
+ * names are dot-without-space like "4.6"), so the capture stays a clean
+ * display string including any effort suffix (e.g. "(High)") — pricing
+ * strips the effort later via getBaseModelName() in config.js (Batch 1, AD-3).
+ * Deliberately NOT global: a module-level regex must stay stateless so
+ * repeated .exec() calls never resume from a stale lastIndex.
+ * @type {RegExp}
+ */
+const SETTINGS_CHANGE_RE = /changed setting `Model Selection` from .+? to ([^\n]+?)(?:[.!?;:,。！？；：](?:\s|$)|\n|[`—–<]|$)/;
+
+/**
  * Loads history index from history.jsonl if available.
  * Returns a map of conversationId -> { title, workspace, timestamp }.
  * @param {string} [customHistoryPath] - Optional custom path for history file.
@@ -103,6 +129,10 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
   let sessionCachedTokens = 0;
   let sessionOutputTokens = 0;
 
+  // Session-level model override from the LAST <USER_SETTINGS_CHANGE> block
+  // in this transcript (AD-2: LAST match wins; null when never changed).
+  let sessionModelOverride = null;
+
   for await (const line of rl) {
     if (!line || !line.trim()) continue;
 
@@ -136,6 +166,22 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
         sessionTitle = content.substring(0, 80).replace(/\r?\n/g, ' ');
       }
       preview = content.substring(0, 60).replace(/\r?\n/g, ' ');
+
+      // AD-2 / REQ-254: scan for the session's effective model+effort.
+      // Cheap substring pre-filter first, then the anchored regex; the LAST
+      // well-formed match in the session wins (session-level granularity).
+      if (content.includes(SETTINGS_CHANGE_MARKER)) {
+        const settingsMatch = SETTINGS_CHANGE_RE.exec(content);
+        if (settingsMatch && settingsMatch[1]) {
+          // Defense-in-depth: strip any trailing sentence punctuation that
+          // survived the regex boundary (e.g. a bare "." at line end) so the
+          // stored identity is always a clean display string (REQ-255).
+          const overrideCandidate = settingsMatch[1].replace(/[.!?;:,。！？；：]+$/, '').trim();
+          if (overrideCandidate) {
+            sessionModelOverride = overrideCandidate;
+          }
+        }
+      }
 
       const contentTokens = estimateTokens(content);
       // New user message adds to context
@@ -207,8 +253,14 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
   }
 
   const totalTokens = sessionInputTokens + sessionCachedTokens + sessionOutputTokens;
-  const costUsd = calculateCostUsd(sessionInputTokens, sessionCachedTokens, sessionOutputTokens, model);
-  const cacheSavingsUsd = calculateCacheSavingsUsd(sessionCachedTokens, model);
+  // AD-2 fallback precedence: session override > modelName param > settings.
+  // `model` already encodes param || settings; the override parsed from the
+  // transcript takes highest precedence for session-level attribution.
+  // Per-turn costs above intentionally keep the pre-pass model (v3.3 scope:
+  // session-level granularity; session totals are the authoritative figure).
+  const finalModel = sessionModelOverride || model;
+  const costUsd = calculateCostUsd(sessionInputTokens, sessionCachedTokens, sessionOutputTokens, finalModel);
+  const cacheSavingsUsd = calculateCacheSavingsUsd(sessionCachedTokens, finalModel);
   const cacheHitRate = (sessionInputTokens + sessionCachedTokens) > 0
     ? (sessionCachedTokens / (sessionInputTokens + sessionCachedTokens)) * 100
     : 0;
@@ -227,7 +279,7 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
     costUsd,
     cacheSavingsUsd,
     cacheHitRate,
-    modelName: model,
+    modelName: finalModel,
     turns
   };
 }

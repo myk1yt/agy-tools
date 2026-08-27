@@ -426,6 +426,23 @@ function renderDashboardHtml(payload, opts = {}) {
     "    if (el && I18N.filterDate) el.textContent = I18N.filterDate;",
     "    el = document.getElementById('filterModelLabel');",
     "    if (el && I18N.filterModel) el.textContent = I18N.filterModel;",
+    "    el = document.getElementById('estimateNote');",
+    "    if (el && I18N.estimateDisclaimer) el.textContent = I18N.estimateDisclaimer;",
+    "    el = document.getElementById('estimateTitle');",
+    "    if (el && I18N.estimatePanelTitle) el.textContent = I18N.estimatePanelTitle;",
+    "    el = document.getElementById('estimatePanelNote');",
+    "    if (el && I18N.estimateDisclaimer) el.textContent = I18N.estimateDisclaimer;",
+    "    el = document.getElementById('estMtdLabel');",
+    "    if (el && I18N.estimateMonthToDate) el.textContent = I18N.estimateMonthToDate;",
+    "    el = document.getElementById('estAvgLabel');",
+    "    if (el && I18N.estimateDailyAverage) el.textContent = I18N.estimateDailyAverage;",
+    "    el = document.getElementById('estMonthEndLabel');",
+    "    if (el && I18N.estimateMonthEnd) el.textContent = I18N.estimateMonthEnd;",
+    "    el = document.getElementById('est30dLabel');",
+    "    if (el && I18N.estimateLast30d) el.textContent = I18N.estimateLast30d;",
+    "    el = document.getElementById('model');",
+    "    if (el && I18N.activeModel && lastPayload) el.textContent = I18N.activeModel + ': ' + (lastPayload.model || '');",
+    "    renderEstimates(lastPayload);",
     "",
     "    var filterBtns = document.querySelectorAll('.filter-btn[data-range]');",
     "    var rangeKeys = { '30d': 'filter30d', '7d': 'filter7d', 'today': 'filterToday', 'yesterday': 'filterYesterday', 'custom': 'filterCustom' };",
@@ -459,6 +476,67 @@ function renderDashboardHtml(payload, opts = {}) {
     "    return FMT.position === 'after' ? num + FMT.symbol : FMT.symbol + num;",
     "  }",
     "  function fmtPct(n) { return (Number(n) || 0).toFixed(1) + '%'; }",
+    "",
+    "  function computeEstimates(daily) {",
+    "    var rows = Array.isArray(daily) ? daily : [];",
+    "    var now = new Date();",
+    "    var y = now.getFullYear();",
+    "    var m = now.getMonth();",
+    "    var monthPrefix = y + '-' + ('0' + (m + 1)).slice(-2);",
+    "    var mtdTokens = 0, mtdCost = 0, totalTokens = 0, totalCost = 0, i;",
+    "    for (i = 0; i < rows.length; i++) {",
+    "      var row = rows[i] || {};",
+    "      var tok = Number(row.totalTokens) || 0;",
+    "      var cost = Number(row.costUsd) || 0;",
+    "      totalTokens += tok;",
+    "      totalCost += cost;",
+    "      if (String(row.date || '').indexOf(monthPrefix) === 0) {",
+    "        mtdTokens += tok;",
+    "        mtdCost += cost;",
+    "      }",
+    "    }",
+    "    var last7 = rows.slice(-7);",
+    "    var sum7Tokens = 0, sum7Cost = 0;",
+    "    for (i = 0; i < last7.length; i++) {",
+    "      sum7Tokens += Number(last7[i].totalTokens) || 0;",
+    "      sum7Cost += Number(last7[i].costUsd) || 0;",
+    "    }",
+    "    var avg7Tokens = sum7Tokens / 7;",
+    "    var avg7Cost = sum7Cost / 7;",
+    "    var avg30Tokens = rows.length > 0 ? totalTokens / rows.length : 0;",
+    "    var avg30Cost = rows.length > 0 ? totalCost / rows.length : 0;",
+    "    var daysInMonth = new Date(y, m + 1, 0).getDate();",
+    "    var remaining = Math.max(0, daysInMonth - now.getDate());",
+    "    var monthEndTokens = mtdTokens + avg7Tokens * remaining;",
+    "    var monthEndCost = mtdCost + avg7Cost * remaining;",
+    "    return {",
+    "      mtdTokens: mtdTokens, mtdCost: mtdCost,",
+    "      avg7Tokens: avg7Tokens, avg7Cost: avg7Cost,",
+    "      avg30Tokens: avg30Tokens, avg30Cost: avg30Cost,",
+    "      monthEndTokens: monthEndTokens, monthEndCost: monthEndCost,",
+    "      total30Tokens: totalTokens, total30Cost: totalCost",
+    "    };",
+    "  }",
+    "  function renderEstimates(p) {",
+    "    var est = computeEstimates(p ? p.daily : null);",
+    "    var pairs = [",
+    "      ['estMtdValue', est.mtdTokens, 'estMtdCost', est.mtdCost],",
+    "      ['estAvgValue', est.avg7Tokens, 'estAvgCost', est.avg7Cost],",
+    "      ['estMonthEndValue', est.monthEndTokens, 'estMonthEndCost', est.monthEndCost],",
+    "      ['est30dValue', est.total30Tokens, 'est30dCost', est.total30Cost]",
+    "    ];",
+    "    for (var i = 0; i < pairs.length; i++) {",
+    "      var vEl = document.getElementById(pairs[i][0]);",
+    "      if (vEl) vEl.textContent = fmtCompact(pairs[i][1]);",
+    "      var cEl = document.getElementById(pairs[i][2]);",
+    "      if (cEl) cEl.textContent = fmtCost(pairs[i][3]);",
+    "    }",
+    "    var avgEl = document.getElementById('estAvgLabel');",
+    "    if (avgEl && I18N.estimateDailyAverage) {",
+    "      var avgDetail = fmtCompact(est.avg7Tokens) + ' / ' + fmtCompact(est.avg30Tokens);",
+    "      avgEl.textContent = I18N.estimateDailyAverage + ' (' + avgDetail + ')';",
+    "    }",
+    "  }",
     "",
     "  function cardHtml(label, s) {",
     "    s = s || {};",
@@ -841,7 +919,8 @@ function renderDashboardHtml(payload, opts = {}) {
     "    var lu = document.getElementById('lastUpdated');",
     "    if (lu) lu.textContent = I18N.lastUpdated.replace('{time}', new Date(p.generatedAt).toLocaleString());",
     "    var model = document.getElementById('model');",
-    "    if (model) model.textContent = p.model || '';",
+    "    if (model) model.textContent = (I18N.activeModel ? I18N.activeModel + ': ' : '') + (p.model || '');",
+    "    renderEstimates(p);",
     "  }",
     "",
     "  function setLive(on) {",
@@ -946,16 +1025,39 @@ td.strong{font-weight:600}
 .subrow td{color:var(--dim);font-size:11px}
 .subrow td:first-child{padding-left:20px}
 [dir=rtl] .subrow td:first-child{padding-left:0;padding-right:20px}
+.estimate-note{color:var(--dim);font-size:11px}
+.est-layout{display:grid;grid-template-columns:1fr;gap:20px;margin-bottom:20px}
+@media(min-width:1200px){.est-layout{grid-template-columns:1.6fr 1fr}}
+.estimate-panel{margin-bottom:0}
+.est-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.est-item{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px}
+.est-label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.est-value{font-size:20px;font-weight:700;margin:4px 0 2px}
+.est-cost{color:var(--green);font-size:12px}
+.estimate-panel .estimate-note{margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
+@media(max-width:560px){.est-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <header>
   <h1 id="dashTitle">\u{1F4CA} ${t('dashboardTitle', {}, lang)}</h1>
-  <div class="meta"><span id="model"></span><span id="live" class="live"></span><span id="lastUpdated"></span></div>
+  <div class="meta"><span id="model"></span><span id="live" class="live"></span><span id="lastUpdated"></span><span id="estimateNote" class="estimate-note">${t('estimateDisclaimer', {}, lang)}</span></div>
 </header>
 <main>
   <section class="panel"><h2 id="chartTitle">${t('chartTitle', {}, lang)}</h2><div id="chart"></div><div id="chartLegend" class="chart-legend"></div></section>
-  <section id="cards" class="cards"></section>
+  <div class="est-layout">
+    <section id="cards" class="cards"></section>
+    <section class="panel estimate-panel" id="estimatePanel">
+      <h2 id="estimateTitle">${t('estimatePanelTitle', {}, lang)}</h2>
+      <div class="est-grid">
+        <div class="est-item"><div class="est-label" id="estMtdLabel"></div><div class="est-value" id="estMtdValue"></div><div class="est-cost" id="estMtdCost"></div></div>
+        <div class="est-item"><div class="est-label" id="estAvgLabel"></div><div class="est-value" id="estAvgValue"></div><div class="est-cost" id="estAvgCost"></div></div>
+        <div class="est-item"><div class="est-label" id="estMonthEndLabel"></div><div class="est-value" id="estMonthEndValue"></div><div class="est-cost" id="estMonthEndCost"></div></div>
+        <div class="est-item"><div class="est-label" id="est30dLabel"></div><div class="est-value" id="est30dValue"></div><div class="est-cost" id="est30dCost"></div></div>
+      </div>
+      <div class="estimate-note" id="estimatePanelNote">${t('estimateDisclaimer', {}, lang)}</div>
+    </section>
+  </div>
   <section id="filters" class="filters">
     <div class="filter-group">
       <span class="filter-group-label" id="filterDateLabel">${t('filterDate', {}, lang)}</span>

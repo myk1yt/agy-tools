@@ -170,7 +170,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Session \"{id}\" not found in brain directory.",
     "invalidDateRange": "Invalid date range format. Use YYYY-MM-DD..YYYY-MM-DD.",
     "cacheSynced": "Cache synchronized successfully ({count} sessions parsed in {ms}ms).",
-    "versionInfo": "v{version} (Zero-Dependency Node.js)"
+    "versionInfo": "v{version} (Zero-Dependency Node.js)",
+    "estimateDisclaimer": "These figures are estimates for long-term usage management.",
+    "estimatePanelTitle": "Long-Term Usage Estimate",
+    "estimateMonthToDate": "This Month So Far",
+    "estimateDailyAverage": "Daily Average (7d / 30d)",
+    "estimateMonthEnd": "Projected Month-End",
+    "estimateLast30d": "Last 30 Days Total"
   },
   "ko": {
     "appName": "Antigravity 토큰 & 비용 트래커",
@@ -295,7 +301,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "세션 \"{id}\"을(를) 찾을 수 없습니다.",
     "invalidDateRange": "날짜 범위 형식이 올바르지 않습니다. (예: YYYY-MM-DD..YYYY-MM-DD)",
     "cacheSynced": "캐시가 성공적으로 동기화되었습니다 ({count}개 세션, {ms}ms 소요).",
-    "versionInfo": "v{version} (무의존 Node.js)"
+    "versionInfo": "v{version} (무의존 Node.js)",
+    "estimateDisclaimer": "이 수치들은 장기 사용 관리를 위한 추정치입니다",
+    "estimatePanelTitle": "장기 사용량 추정",
+    "estimateMonthToDate": "이번 달 누적",
+    "estimateDailyAverage": "일평균 사용량 (7일/30일)",
+    "estimateMonthEnd": "월말 예상",
+    "estimateLast30d": "최근 30일 총 사용량"
   },
   "ja": {
     "appName": "Antigravity トークン＆コストトラッカー",
@@ -420,7 +432,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "セッション「{id}」が見つかりません。",
     "invalidDateRange": "日付範囲の形式が無効です (例: YYYY-MM-DD..YYYY-MM-DD)。",
     "cacheSynced": "キャッシュの同期が完了しました ({count} 件、{ms}ms)。",
-    "versionInfo": "v{version} (依存関係ゼロ Node.js)"
+    "versionInfo": "v{version} (依存関係ゼロ Node.js)",
+    "estimateDisclaimer": "これらの数値は長期的な使用量管理のための推定値です",
+    "estimatePanelTitle": "長期使用量の推定",
+    "estimateMonthToDate": "今月の累計",
+    "estimateDailyAverage": "1日平均 (7日/30日)",
+    "estimateMonthEnd": "月末予測",
+    "estimateLast30d": "直近30日の合計"
   },
   "zh": {
     "appName": "Antigravity 词元与成本追踪器",
@@ -545,7 +563,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "未找到会话 \"{id}\"。",
     "invalidDateRange": "日期范围格式错误，请使用 YYYY-MM-DD..YYYY-MM-DD。",
     "cacheSynced": "缓存同步完成（已解析 {count} 个会话，耗时 {ms}ms）。",
-    "versionInfo": "v{version} (纯原生零依赖 Node.js)"
+    "versionInfo": "v{version} (纯原生零依赖 Node.js)",
+    "estimateDisclaimer": "这些数字是用于长期使用管理的估算值",
+    "estimatePanelTitle": "长期使用量估算",
+    "estimateMonthToDate": "本月累计",
+    "estimateDailyAverage": "日均使用量 (7天/30天)",
+    "estimateMonthEnd": "月末预估",
+    "estimateLast30d": "最近 30 天总计"
   },
   "zh-TW": {
     "appName": "Antigravity 詞元與成本追蹤器",
@@ -670,7 +694,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "未找到對話 \"{id}\"。",
     "invalidDateRange": "日期範圍格式錯誤，請使用 YYYY-MM-DD..YYYY-MM-DD。",
     "cacheSynced": "快取同步完成（已解析 {count} 個對話，耗時 {ms}ms）。",
-    "versionInfo": "v{version} (純原生零依賴 Node.js)"
+    "versionInfo": "v{version} (純原生零依賴 Node.js)",
+    "estimateDisclaimer": "這些數字是為了長期使用管理所做的估算值",
+    "estimatePanelTitle": "長期使用量估算",
+    "estimateMonthToDate": "本月累計",
+    "estimateDailyAverage": "日均使用量 (7天/30天)",
+    "estimateMonthEnd": "月末預估",
+    "estimateLast30d": "最近 30 天總計"
   },
   "hi": {
     "appName": "Antigravity टोकन और लागत ट्रैकर",
@@ -795,7 +825,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "सत्र \"{id}\" नहीं मिला।",
     "invalidDateRange": "अमान्य तिथि सीमा प्रारूप। YYYY-MM-DD..YYYY-MM-DD का उपयोग करें।",
     "cacheSynced": "कैश सफलतापूर्वक सिंक हुआ ({ms}ms में {count} सत्र)।",
-    "versionInfo": "v{version} (शून्य निर्भरता Node.js)"
+    "versionInfo": "v{version} (शून्य निर्भरता Node.js)",
+    "estimateDisclaimer": "ये आंकड़े दीर्घकालिक उपयोग प्रबंधन के लिए अनुमानित हैं",
+    "estimatePanelTitle": "दीर्घकालिक उपयोग अनुमान",
+    "estimateMonthToDate": "इस महीने अब तक",
+    "estimateDailyAverage": "दैनिक औसत (7 दिन / 30 दिन)",
+    "estimateMonthEnd": "महीने के अंत का अनुमान",
+    "estimateLast30d": "पिछले 30 दिनों का कुल योग"
   },
   "vi": {
     "appName": "Bộ theo dõi Token & Chi phí Antigravity",
@@ -920,7 +956,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Không tìm thấy phiên \"{id}\" trong thư mục brain.",
     "invalidDateRange": "Định dạng khoảng ngày không hợp lệ. Sử dụng YYYY-MM-DD..YYYY-MM-DD.",
     "cacheSynced": "Đồng bộ bộ nhớ đệm thành công (đã phân tích {count} phiên trong {ms}ms).",
-    "versionInfo": "v{version} (Node.js Không phụ thuộc)"
+    "versionInfo": "v{version} (Node.js Không phụ thuộc)",
+    "estimateDisclaimer": "Các số liệu này là ước tính phục vụ việc quản lý sử dụng lâu dài",
+    "estimatePanelTitle": "Ước tính sử dụng dài hạn",
+    "estimateMonthToDate": "Lũy kế tháng này",
+    "estimateDailyAverage": "Trung bình mỗi ngày (7 ngày / 30 ngày)",
+    "estimateMonthEnd": "Dự báo cuối tháng",
+    "estimateLast30d": "Tổng 30 ngày qua"
   },
   "id": {
     "appName": "Pelacak Token & Biaya Antigravity",
@@ -1045,7 +1087,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Sesi \"{id}\" tidak ditemukan di direktori brain.",
     "invalidDateRange": "Format rentang tanggal tidak valid. Gunakan YYYY-MM-DD..YYYY-MM-DD.",
     "cacheSynced": "Cache berhasil disinkronkan ({count} sesi diurai dalam {ms}ms).",
-    "versionInfo": "v{version} (Node.js Tanpa Dependensi)"
+    "versionInfo": "v{version} (Node.js Tanpa Dependensi)",
+    "estimateDisclaimer": "Angka-angka ini merupakan estimasi untuk pengelolaan penggunaan jangka panjang",
+    "estimatePanelTitle": "Estimasi Penggunaan Jangka Panjang",
+    "estimateMonthToDate": "Bulan Ini Sejauh Ini",
+    "estimateDailyAverage": "Rata-rata Harian (7 hari / 30 hari)",
+    "estimateMonthEnd": "Proyeksi Akhir Bulan",
+    "estimateLast30d": "Total 30 Hari Terakhir"
   },
   "th": {
     "appName": "เครื่องมือติดตามโทเค็นและค่าใช้จ่าย Antigravity",
@@ -1170,7 +1218,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "ไม่พบเซสชัน \"{id}\" ในไดเรกทอรี brain",
     "invalidDateRange": "รูปแบบช่วงวันที่ไม่ถูกต้อง โปรดใช้ YYYY-MM-DD..YYYY-MM-DD",
     "cacheSynced": "ซิงค์แคชสำเร็จแล้ว (แยกวิเคราะห์ {count} เซสชันใน {ms}ms)",
-    "versionInfo": "v{version} (Node.js ไร้การพึ่งพาภายนอก)"
+    "versionInfo": "v{version} (Node.js ไร้การพึ่งพาภายนอก)",
+    "estimateDisclaimer": "ตัวเลขเหล่านี้เป็นค่าประมาณการเพื่อการจัดการการใช้งานระยะยาว",
+    "estimatePanelTitle": "การประมาณการใช้งานระยะยาว",
+    "estimateMonthToDate": "สะสมเดือนนี้",
+    "estimateDailyAverage": "ค่าเฉลี่ยต่อวัน (7 วัน / 30 วัน)",
+    "estimateMonthEnd": "ประมาณการสิ้นเดือน",
+    "estimateLast30d": "ยอดรวม 30 วันที่ผ่านมา"
   },
   "de": {
     "appName": "Antigravity Token- & Kosten-Tracker",
@@ -1295,7 +1349,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Sitzung \"{id}\" im Brain-Verzeichnis nicht gefunden.",
     "invalidDateRange": "Ungültiges Datumsbereichsformat. Verwenden Sie YYYY-MM-DD..YYYY-MM-DD.",
     "cacheSynced": "Cache erfolgreich synchronisiert ({count} Sitzungen in {ms}ms geparst).",
-    "versionInfo": "v{version} (Node.js ohne externe Abhängigkeiten)"
+    "versionInfo": "v{version} (Node.js ohne externe Abhängigkeiten)",
+    "estimateDisclaimer": "Diese Zahlen sind Schätzwerte für die langfristige Nutzungsverwaltung.",
+    "estimatePanelTitle": "Langfristige Nutzungsschätzung",
+    "estimateMonthToDate": "Bisher in diesem Monat",
+    "estimateDailyAverage": "Tagesdurchschnitt (7 Tage / 30 Tage)",
+    "estimateMonthEnd": "Prognose Monatsende",
+    "estimateLast30d": "Gesamtsumme der letzten 30 Tage"
   },
   "fr": {
     "appName": "Suivi des Jetons & Coûts Antigravity",
@@ -1420,7 +1480,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Session \"{id}\" introuvable dans le répertoire brain.",
     "invalidDateRange": "Format de plage de dates invalide. Utilisez AAAA-MM-JJ..AAAA-MM-JJ.",
     "cacheSynced": "Cache synchronisé avec succès ({count} sessions analysées en {ms}ms).",
-    "versionInfo": "v{version} (Node.js sans dépendance)"
+    "versionInfo": "v{version} (Node.js sans dépendance)",
+    "estimateDisclaimer": "Ces chiffres sont des estimations destinées à la gestion de l'utilisation à long terme.",
+    "estimatePanelTitle": "Estimation d'utilisation à long terme",
+    "estimateMonthToDate": "Cumul du mois en cours",
+    "estimateDailyAverage": "Moyenne quotidienne (7 j / 30 j)",
+    "estimateMonthEnd": "Projection fin de mois",
+    "estimateLast30d": "Total des 30 derniers jours"
   },
   "es": {
     "appName": "Rastreador de Tokens y Costes Antigravity",
@@ -1545,7 +1611,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Sesión \"{id}\" no encontrada en el directorio brain.",
     "invalidDateRange": "Formato de rango de fechas no válido. Use AAAA-MM-DD..AAAA-MM-DD.",
     "cacheSynced": "Caché sincronizada con éxito ({count} sesiones procesadas en {ms}ms).",
-    "versionInfo": "v{version} (Node.js sin dependencias)"
+    "versionInfo": "v{version} (Node.js sin dependencias)",
+    "estimateDisclaimer": "Estas cifras son estimaciones para la gestión del uso a largo plazo.",
+    "estimatePanelTitle": "Estimación de uso a largo plazo",
+    "estimateMonthToDate": "Acumulado del mes",
+    "estimateDailyAverage": "Promedio diario (7 días / 30 días)",
+    "estimateMonthEnd": "Proyección de fin de mes",
+    "estimateLast30d": "Total de los últimos 30 días"
   },
   "pt": {
     "appName": "Rastreador de Tokens e Custos Antigravity",
@@ -1670,7 +1742,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Sessão \"{id}\" não encontrada no diretório brain.",
     "invalidDateRange": "Formato de intervalo de datas inválido. Use AAAA-MM-DD..AAAA-MM-DD.",
     "cacheSynced": "Cache sincronizado com sucesso ({count} sessões analisadas em {ms}ms).",
-    "versionInfo": "v{version} (Node.js Sem Dependências)"
+    "versionInfo": "v{version} (Node.js Sem Dependências)",
+    "estimateDisclaimer": "Estes valores são estimativas para a gestão do uso a longo prazo.",
+    "estimatePanelTitle": "Estimativa de uso a longo prazo",
+    "estimateMonthToDate": "Acumulado do mês",
+    "estimateDailyAverage": "Média diária (7 dias / 30 dias)",
+    "estimateMonthEnd": "Projeção para o fim do mês",
+    "estimateLast30d": "Total dos últimos 30 dias"
   },
   "it": {
     "appName": "Tracciatore Token & Costi Antigravity",
@@ -1795,7 +1873,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Sessione \"{id}\" non trovata nella directory brain.",
     "invalidDateRange": "Formato intervallo date non valido. Usa AAAA-MM-GG..AAAA-MM-GG.",
     "cacheSynced": "Cache sincronizzata con successo ({count} sessioni analizzate in {ms}ms).",
-    "versionInfo": "v{version} (Node.js a zero dipendenze)"
+    "versionInfo": "v{version} (Node.js a zero dipendenze)",
+    "estimateDisclaimer": "Questi valori sono stime per la gestione dell'utilizzo a lungo termine.",
+    "estimatePanelTitle": "Stima dell'utilizzo a lungo termine",
+    "estimateMonthToDate": "Da inizio mese",
+    "estimateDailyAverage": "Media giornaliera (7 giorni / 30 giorni)",
+    "estimateMonthEnd": "Proiezione di fine mese",
+    "estimateLast30d": "Totale ultimi 30 giorni"
   },
   "nl": {
     "appName": "Antigravity Token & Kosten Tracker",
@@ -1920,7 +2004,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Sessie \"{id}\" niet gevonden in brain-map.",
     "invalidDateRange": "Ongeldig datumbereikformaat. Gebruik JJJJ-MM-DD..JJJJ-MM-DD.",
     "cacheSynced": "Cache succesvol gesynchroniseerd ({count} sessies verwerkt in {ms}ms).",
-    "versionInfo": "v{version} (Nul-afhankelijkheden Node.js)"
+    "versionInfo": "v{version} (Nul-afhankelijkheden Node.js)",
+    "estimateDisclaimer": "Deze cijfers zijn schattingen voor het beheer van langdurig gebruik.",
+    "estimatePanelTitle": "Schatting van langdurig gebruik",
+    "estimateMonthToDate": "Deze maand tot nu toe",
+    "estimateDailyAverage": "Dagelijks gemiddelde (7 dagen / 30 dagen)",
+    "estimateMonthEnd": "Prognose einde maand",
+    "estimateLast30d": "Totaal laatste 30 dagen"
   },
   "pl": {
     "appName": "Licznik Tokenów i Kosztów Antigravity",
@@ -2045,7 +2135,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Nie znaleziono sesji \"{id}\" w katalogu brain.",
     "invalidDateRange": "Nieprawidłowy format zakresu dat. Użyj RRRR-MM-DD..RRRR-MM-DD.",
     "cacheSynced": "Pamięć podręczna zsynchronizowana pomyślnie ({count} sesji przeanalizowano w {ms}ms).",
-    "versionInfo": "v{version} (Zero zależności Node.js)"
+    "versionInfo": "v{version} (Zero zależności Node.js)",
+    "estimateDisclaimer": "Te wartości to szacunki służące do długoterminowego zarządzania użyciem.",
+    "estimatePanelTitle": "Szacowanie długoterminowego użycia",
+    "estimateMonthToDate": "W tym miesiącu do tej pory",
+    "estimateDailyAverage": "Średnia dzienna (7 dni / 30 dni)",
+    "estimateMonthEnd": "Prognoza na koniec miesiąca",
+    "estimateLast30d": "Suma z ostatnich 30 dni"
   },
   "sv": {
     "appName": "Antigravity Token- & Kostnadsspårare",
@@ -2170,7 +2266,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Session \"{id}\" hittades inte i brain-katalogen.",
     "invalidDateRange": "Ogiltigt format för datumintervall. Använd ÅÅÅÅ-MM-DD..ÅÅÅÅ-MM-DD.",
     "cacheSynced": "Cachen har synkroniserats ({count} sessioner tolkade på {ms}ms).",
-    "versionInfo": "v{version} (Nollberoende Node.js)"
+    "versionInfo": "v{version} (Nollberoende Node.js)",
+    "estimateDisclaimer": "Dessa siffror är uppskattningar för långsiktig användningshantering.",
+    "estimatePanelTitle": "Långsiktig användningsuppskattning",
+    "estimateMonthToDate": "Hittills denna månad",
+    "estimateDailyAverage": "Dagligt genomsnitt (7 dagar / 30 dagar)",
+    "estimateMonthEnd": "Prognos för månadens slut",
+    "estimateLast30d": "Totalt senaste 30 dagarna"
   },
   "ru": {
     "appName": "Отслеживание токенов и расходов Antigravity",
@@ -2295,7 +2397,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "Сессия \"{id}\" не найдена в каталоге brain.",
     "invalidDateRange": "Неверный формат диапазона дат. Используйте ГГГГ-ММ-ДД..ГГГГ-ММ-ДД.",
     "cacheSynced": "Кэш успешно синхронизирован (обработано {count} сессий за {ms}мс).",
-    "versionInfo": "v{version} (Node.js без зависимостей)"
+    "versionInfo": "v{version} (Node.js без зависимостей)",
+    "estimateDisclaimer": "Эти цифры являются оценками для долгосрочного управления использованием.",
+    "estimatePanelTitle": "Долгосрочная оценка использования",
+    "estimateMonthToDate": "С начала месяца",
+    "estimateDailyAverage": "В среднем за день (7 дн. / 30 дн.)",
+    "estimateMonthEnd": "Прогноз на конец месяца",
+    "estimateLast30d": "Всего за последние 30 дней"
   },
   "ar": {
     "appName": "متتبع الرموز والتكلفة Antigravity",
@@ -2420,7 +2528,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "لم يتم العثور على الجلسة \"{id}\" في دليل brain.",
     "invalidDateRange": "تنسيق النطاق الزمني غير صالح. استخدم YYYY-MM-DD..YYYY-MM-DD.",
     "cacheSynced": "تمت مزامنة الذاكرة المؤقتة بنجاح (تم تحليل {count} جلسة في {ms} مللي ثانية).",
-    "versionInfo": "v{version} (Node.js بدون تبعيات خارجية)"
+    "versionInfo": "v{version} (Node.js بدون تبعيات خارجية)",
+    "estimateDisclaimer": "هذه الأرقام تقديرية لإدارة الاستخدام على المدى الطويل",
+    "estimatePanelTitle": "تقدير الاستخدام على المدى الطويل",
+    "estimateMonthToDate": "هذا الشهر حتى الآن",
+    "estimateDailyAverage": "المتوسط اليومي (7 أيام / 30 يوماً)",
+    "estimateMonthEnd": "التوقع لنهاية الشهر",
+    "estimateLast30d": "إجمالي آخر 30 يوماً"
   },
   "he": {
     "appName": "מעקב אסימונים ועלויות Antigravity",
@@ -2545,7 +2659,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "ההפעלה \"{id}\" לא נמצאה בספריית brain.",
     "invalidDateRange": "פורמט טווח תאריכים לא תקין. השתמש ב-YYYY-MM-DD..YYYY-MM-DD.",
     "cacheSynced": "המטמון סונכרן בהצלחה ({count} הפעלות נותחו ב-{ms}ms).",
-    "versionInfo": "v{version} (Node.js ללא תלויות)"
+    "versionInfo": "v{version} (Node.js ללא תלויות)",
+    "estimateDisclaimer": "הנתונים הם הערכות לניהול שימוש ארוך טווח",
+    "estimatePanelTitle": "הערכת שימוש לטווח ארוך",
+    "estimateMonthToDate": "החודש עד כה",
+    "estimateDailyAverage": "ממוצע יומי (7 ימים / 30 ימים)",
+    "estimateMonthEnd": "תחזית סוף חודש",
+    "estimateLast30d": "סך 30 הימים האחרונים"
   },
   "tr": {
     "appName": "Antigravity Jeton ve Maliyet Takipçisi",
@@ -2670,7 +2790,13 @@ const TRANSLATIONS = {
     "sessionNotFound": "\"{id}\" oturumu brain dizininde bulunamadı.",
     "invalidDateRange": "Geçersiz tarih aralığı biçimi. YYYY-AA-GG..YYYY-AA-GG kullanın.",
     "cacheSynced": "Önbellek başarıyla senkronize edildi ({count} oturum {ms}ms içinde ayrıştırıldı).",
-    "versionInfo": "v{version} (Sıfır Bağımlılıklı Node.js)"
+    "versionInfo": "v{version} (Sıfır Bağımlılıklı Node.js)",
+    "estimateDisclaimer": "Bu değerler, uzun vadeli kullanım yönetimi için tahminlerdir.",
+    "estimatePanelTitle": "Uzun Vadeli Kullanım Tahmini",
+    "estimateMonthToDate": "Bu ay bugüne kadar",
+    "estimateDailyAverage": "Günlük ortalama (7 gün / 30 gün)",
+    "estimateMonthEnd": "Ay sonu tahmini",
+    "estimateLast30d": "Son 30 gün toplamı"
   }
 };
 
