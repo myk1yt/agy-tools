@@ -21,12 +21,14 @@ const {
   DASHBOARD_DATA_JSON,
   DASHBOARD_DEFAULT_PORT,
   DASHBOARD_WRITE_THROTTLE_MS,
-  CURRENCIES
+  CURRENCIES,
+  calculateCostUsd,
+  calculateCacheSavingsUsd
 } = require('./config');
 const { formatLocalDate, summarizeTurns } = require('./aggregator');
 const { t } = require('./i18n');
 
-const DASHBOARD_PAYLOAD_VERSION = 1;
+const DASHBOARD_PAYLOAD_VERSION = 2;
 const DASHBOARD_DEFAULT_REFRESH_SEC = 5;
 
 /**
@@ -110,16 +112,66 @@ function buildDashboardPayload(sessions, opts = {}) {
     sessionIdsByDate.set(key, new Set());
   }
 
+  // Per-model accumulators (W4/REQ-107): each session is costed with its OWN
+  // modelName (session.modelName), never the global active model.
+  const modelsMap = new Map();
+
   for (const session of list) {
     if (!session || !Array.isArray(session.turns)) continue;
+    const sessionModel = session.modelName || modelName || 'unknown';
+    let modelRow = modelsMap.get(sessionModel);
+    if (!modelRow) {
+      modelRow = {
+        model: sessionModel,
+        displayName: sessionModel,
+        totalTokens: 0,
+        inputTokens: 0,
+        cachedTokens: 0,
+        outputTokens: 0,
+        cacheHitRate: 0,
+        costUsd: 0,
+        cacheSavingsUsd: 0,
+        sessions: 0,
+        turns: 0
+      };
+      modelsMap.set(sessionModel, modelRow);
+    }
+    modelRow.sessions += 1;
+    modelRow.turns += session.turns.length;
+
     for (const turn of session.turns) {
       const key = formatLocalDate(new Date(turn.createdAt));
       if (turnsByDate.has(key)) {
         turnsByDate.get(key).push(turn);
         sessionIdsByDate.get(key).add(session.sessionId);
       }
+      modelRow.inputTokens += turn.inputTokens || 0;
+      modelRow.cachedTokens += turn.cachedTokens || 0;
+      modelRow.outputTokens += turn.outputTokens || 0;
     }
+
+    // Cost with the session's own model (per-session/per-turn accuracy).
+    modelRow.costUsd += calculateCostUsd(
+      session.inputTokens || 0,
+      session.cachedTokens || 0,
+      session.outputTokens || 0,
+      sessionModel
+    );
+    modelRow.cacheSavingsUsd += calculateCacheSavingsUsd(session.cachedTokens || 0, sessionModel);
   }
+
+  // Finalize per-model rows: totals + cache hit rate, sorted by cost desc.
+  const models = Array.from(modelsMap.values())
+    .map(row => {
+      row.totalTokens = row.inputTokens + row.cachedTokens + row.outputTokens;
+      row.cacheHitRate = row.inputTokens + row.cachedTokens > 0
+        ? (row.cachedTokens / (row.inputTokens + row.cachedTokens)) * 100
+        : 0;
+      row.costUsd = round6(row.costUsd);
+      row.cacheSavingsUsd = round6(row.cacheSavingsUsd);
+      return row;
+    })
+    .sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens);
 
   // Per-day summaries (DailyRow schema)
   const daily = dateKeys.map(key => {
@@ -164,6 +216,7 @@ function buildDashboardPayload(sessions, opts = {}) {
     lang: opts.lang || 'en',
     isFree: Boolean(opts.isFree),
     model: opts.model || '',
+    models,
     summaries: {
       today: todaySummary,
       yesterday: yesterdaySummary,
@@ -205,6 +258,8 @@ function dashboardI18n() {
     summary30d: t('summary30d'),
     chartTitle: t('chartTitle'),
     tableTitle: t('tableTitle'),
+    modelsTitle: t('modelsTitle'),
+    modelColumn: t('modelColumn'),
     lastUpdated: t('lastUpdated'),
     liveStatus: t('liveStatus'),
     noDataFound: t('noDataFound'),
@@ -344,6 +399,31 @@ function renderDashboardHtml(payload, opts = {}) {
     "    return '<table>' + head + rows + '</table>';",
     "  }",
     "",
+    "  function renderModels(models) {",
+    "    var wrap = document.getElementById('modelsWrap');",
+    "    if (!wrap) return;",
+    "    if (!models || models.length === 0) {",
+    "      wrap.innerHTML = '<div class=\"models-empty\">' + esc(I18N.noDataFound) + '</div>';",
+    "      return;",
+    "    }",
+    "    var maxTok = 0, i;",
+    "    for (i = 0; i < models.length; i++) { if (models[i].totalTokens > maxTok) maxTok = models[i].totalTokens; }",
+    "    if (maxTok <= 0) maxTok = 1;",
+    "    var html = '<table><tr><th>' + esc(I18N.modelColumn) + '</th><th>' + esc(I18N.colSessions) + '</th><th>' +",
+    "      esc(I18N.colTurns) + '</th><th>' + esc(I18N.colInput) + '</th><th>' + esc(I18N.colCached) + '</th><th>' +",
+    "      esc(I18N.colOutput) + '</th><th>' + esc(I18N.colTotal) + '</th><th>' + esc(I18N.colCacheHit) + '</th><th>' +",
+    "      esc(I18N.colCost) + '</th><th>' + esc(I18N.colSavings) + '</th><th>' + esc(I18N.colTotal) + '</th></tr>';",
+    "    for (i = 0; i < models.length; i++) {",
+    "      var m = models[i];",
+    "      var pct = Math.max(m.totalTokens > 0 ? 2 : 0, Math.round((m.totalTokens / maxTok) * 100));",
+    "      html += '<tr><td class=\"strong\">' + esc(m.displayName || m.model) + '</td><td>' + m.sessions + '</td><td>' + m.turns + '</td><td>' +",
+    "        fmtCompact(m.inputTokens) + '</td><td>' + fmtCompact(m.cachedTokens) + '</td><td>' + fmtCompact(m.outputTokens) + '</td><td>' +",
+    "        fmtCompact(m.totalTokens) + '</td><td>' + fmtPct(m.cacheHitRate) + '</td><td>' + fmtCost(m.costUsd) + '</td><td>' +",
+    "        fmtCost(m.cacheSavingsUsd) + '</td><td><div class=\"share\"><div class=\"share-bar\" style=\"width:' + pct + '%\"></div></div></td></tr>';",
+    "    }",
+    "    wrap.innerHTML = html + '</table>';",
+    "  }",
+    "",
     "  function render(p) {",
     "    if (!p) return;",
     "    var s = p.summaries || {};",
@@ -353,6 +433,7 @@ function renderDashboardHtml(payload, opts = {}) {
     "    var daily = p.daily || [];",
     "    document.getElementById('chart').innerHTML = renderSvg(daily);",
     "    document.getElementById('tableWrap').innerHTML = renderTable(daily);",
+    "    renderModels(p.models);",
     "    var empty = (!s.last30d || s.last30d.totalTokens === 0) && (!s.today || s.today.totalTokens === 0);",
     "    document.getElementById('empty').style.display = empty ? 'block' : 'none';",
     "    var lu = document.getElementById('lastUpdated');",
@@ -434,6 +515,10 @@ th:first-child,td:first-child{text-align:left}
 th{color:var(--dim);font-weight:600}
 td.strong{font-weight:600}
 #empty{display:none;color:var(--dim);padding:24px;text-align:center}
+.models-empty{color:var(--dim);padding:12px 0;text-align:center;font-size:12px}
+.share{background:var(--panel);border:1px solid var(--border);border-radius:4px;height:12px;min-width:80px;overflow:hidden}
+.share-bar{background:var(--accent);height:100%;border-radius:3px}
+.share-bar:last-child{background:var(--green)}
 </style>
 </head>
 <body>
@@ -444,6 +529,7 @@ td.strong{font-weight:600}
 <main>
   <section id="cards" class="cards"></section>
   <section class="panel"><h2>${t('chartTitle')}</h2><div id="chart"></div></section>
+  <section class="panel"><h2>${t('modelsTitle')}</h2><div id="modelsWrap"></div></section>
   <section class="panel"><h2>${t('tableTitle')}</h2><div id="tableWrap"></div></section>
   <div id="empty">${t('noDataFound')}</div>
 </main>

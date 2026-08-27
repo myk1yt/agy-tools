@@ -31,35 +31,25 @@ if %ERRORLEVEL% equ 0 (
     echo [SUCCESS] Created launcher at %BIN_PATH%
 )
 
-:: Ensure Gemini skill and hook integration
-set "GEMINI_DIR=%USERPROFILE%\.gemini"
-if exist "%GEMINI_DIR%" (
-    echo [INFO] Configuring Gemini skill and hook integrations...
-
-    if not exist "%GEMINI_DIR%\skills\usage" mkdir "%GEMINI_DIR%\skills\usage"
-    copy /y "%ROOT_DIR%\integrations\skills\usage\SKILL.md" "%GEMINI_DIR%\skills\usage\SKILL.md" >nul 2>nul
-
-    if not exist "%GEMINI_DIR%\skills\tokens" mkdir "%GEMINI_DIR%\skills\tokens"
-    copy /y "%ROOT_DIR%\integrations\skills\tokens\SKILL.md" "%GEMINI_DIR%\skills\tokens\SKILL.md" >nul 2>nul
-
-    REM Merge-safe hooks.json: only write if missing OR no "token-tracker" key (never clobber other hooks)
-    set "HOOKS_MERGE_NEEDED=0"
-    if not exist "%GEMINI_DIR%\hooks.json" set "HOOKS_MERGE_NEEDED=1"
-    if "!HOOKS_MERGE_NEEDED!"=="0" (
-        findstr /c:"token-tracker" "%GEMINI_DIR%\hooks.json" >nul 2>nul
-        if errorlevel 1 set "HOOKS_MERGE_NEEDED=1"
-    )
-    if "!HOOKS_MERGE_NEEDED!"=="1" (
-        copy /y "%ROOT_DIR%\integrations\hooks.json" "%GEMINI_DIR%\hooks.json" >nul 2>nul
-        echo [INFO] Installed token-tracker PostInvocation hook in %GEMINI_DIR%\hooks.json
-    ) else (
-        echo [INFO] Existing hooks.json already contains token-tracker; left untouched.
-    )
-
-    echo [SUCCESS] Configured usage + tokens skills and PostInvocation hook in %GEMINI_DIR%
-)
-
 echo.
+echo [INFO] Statusline integration (the ONLY integration point — agy itself is never modified):
+echo.
+echo   Add this entry to %USERPROFILE%\.gemini\antigravity-cli\settings.json
+echo   (merge into the existing JSON object, then restart agy):
+echo.
+echo   "statusLine": {
+echo     "type": "command",
+echo     "command": "C:\PROGRA~1\nodejs\node.exe C:\Users\k1yt\AppData\Roaming\npm\NODE_M~1\AGY-TO~1\bin\AGY-TO~1.JS --hook --raw --write-dashboard",
+echo     "enabled": true,
+echo     "stack_with_default": true
+echo   }
+echo.
+echo   - 8.3 short paths, no inner quotes: survives cmd.exe parsing and npm path changes.
+echo   - Adjust the short paths if your Node/npm locations differ ("dir /x" shows them).
+echo   - --write-dashboard refreshes the browser dashboard data on every state change.
+echo   - Run "agy-tokens --html" once to generate the initial dashboard.
+echo.
+
 echo Try running:
 echo   agy-tools --version
 echo   agy-tools prices --currency krw
@@ -67,4 +57,3 @@ echo   agy-tokens --help
 echo.
 
 endlocal
-

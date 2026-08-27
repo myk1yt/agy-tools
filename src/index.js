@@ -17,7 +17,7 @@ const hookHandler = require('./hook-handler');
 const priceSyncer = require('./price-syncer');
 const htmlReport = require('./html-report');
 const serve = require('./serve');
-const { dashboardFileUrl } = require('./osc8');
+const osc8 = require('./osc8');
 
 const pkg = require('../package.json');
 
@@ -300,7 +300,7 @@ async function runCli(argv = process.argv) {
       servePort: options.servePort || config.DASHBOARD_DEFAULT_PORT
     });
 
-    const htmlUrl = dashboardFileUrl();
+    const htmlUrl = osc8.dashboardFileUrl();
     console.log(`\n  ${formatter.styleText('✔', 'brightGreen')} ${i18n.t('openDashboard', { url: htmlUrl })}`);
     console.log(`  ${formatter.styleText('↳', 'gray')} ${config.DASHBOARD_HTML_FILE}\n`);
 
@@ -344,6 +344,13 @@ async function runCli(argv = process.argv) {
     const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
     const activeModel = options.model || config.getActiveModelFromSettings();
 
+    // W1: OSC 8 hyperlink for the 📊 Dashboard badge segment. --no-link omits
+    // the segment entirely; NO_COLOR/TERM=dumb degrade to plain text inside
+    // formatOsc8Link (isOsc8Supported).
+    const dashboardLink = options.noLink
+      ? null
+      : osc8.formatOsc8Link(osc8.dashboardFileUrl(), `📊 ${i18n.t('dashboardLink')}`);
+
     // ONE syncSessions pass shared by badge and dashboard writer (C4)
     const syncResult = await cacheManager.syncSessions({
       forceFresh: options.fresh,
@@ -355,7 +362,8 @@ async function runCli(argv = process.argv) {
       modelName: options.model,
       isFree,
       stdinContext,
-      sessions: syncResult.sessions
+      sessions: syncResult.sessions,
+      link: dashboardLink
     });
 
     if (options.writeDashboard) {

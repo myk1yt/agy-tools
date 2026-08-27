@@ -20,7 +20,6 @@
     "agy-dashboard",
     "gemini",
     "claude",
-    "token-tracker",
     "cost-tracker",
     "dashboard",
     "cli",
@@ -40,7 +39,6 @@
   "files": [
     "bin",
     "src",
-    "integrations",
     "scripts",
     "LICENSE",
     "README.md"

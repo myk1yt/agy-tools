@@ -730,8 +730,8 @@ async function runAllTests() {
     });
   });
 
-  // --- Suite 10: Toolkit Subcommand & Extensibility Unit Tests ---
-  await describe('10. Toolkit Subcommand & Extensibility Unit Tests', async () => {
+  // --- Suite 10: Toolkit Subcommand & Statusline-Only Concept Integrity ---
+  await describe('10. Toolkit Subcommand & Statusline-Only Concept Integrity', async () => {
     await test('Should correctly verify package.json bin registrations', () => {
       const pkgJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
       assert.strictEqual(pkgJson.name, 'agy-tools');
@@ -745,29 +745,22 @@ async function runAllTests() {
       assert(fs.existsSync(path.join(__dirname, '..', 'bin', 'agy-tools.js')));
     });
 
-    await test('integrations/skills/usage/SKILL.md must start with valid YAML frontmatter', () => {
-      const skillPath = path.join(__dirname, '..', 'integrations', 'skills', 'usage', 'SKILL.md');
-      assert(fs.existsSync(skillPath), 'SKILL.md must exist');
-      const content = fs.readFileSync(skillPath, 'utf8');
-      assert(content.startsWith('---'), 'SKILL.md must start with YAML frontmatter delimiter (---)');
-      const parts = content.split('---');
-      assert(parts.length >= 3, 'Must contain closing YAML delimiter (---)');
-      const frontmatter = parts[1];
-      assert(frontmatter.includes('name: usage'), 'Frontmatter must have name: usage');
-      assert(frontmatter.includes('description:'), 'Frontmatter must have description');
-      assert(content.includes('agy-tokens'), 'SKILL.md instructions must mention agy-tokens');
+    await test('Statusline-only concept: integrations/skills/ must NOT exist (no skills regression guard)', () => {
+      const skillsDir = path.join(__dirname, '..', 'integrations', 'skills');
+      assert(!fs.existsSync(skillsDir), 'integrations/skills/ must not exist — statusline-only concept forbids skills');
     });
 
-    await test('integrations/hooks.json must conform to official Antigravity PostInvocation schema', () => {
+    await test('Statusline-only concept: integrations/hooks.json must NOT exist (no hooks regression guard)', () => {
       const hooksPath = path.join(__dirname, '..', 'integrations', 'hooks.json');
-      assert(fs.existsSync(hooksPath), 'integrations/hooks.json must exist');
-      const hooksJson = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
-      assert(hooksJson['token-tracker'], 'Must have top-level token-tracker key');
-      assert(Array.isArray(hooksJson['token-tracker'].PostInvocation), 'token-tracker.PostInvocation must be an array');
-      const hookEntry = hooksJson['token-tracker'].PostInvocation[0];
-      assert.strictEqual(hookEntry.type, 'command');
-      assert.strictEqual(hookEntry.command, 'agy-tokens --hook');
-      assert.strictEqual(hookEntry.timeout, 10);
+      assert(!fs.existsSync(hooksPath), 'integrations/hooks.json must not exist — statusline --write-dashboard supersedes the PostInvocation hook');
+    });
+
+    await test('Statusline-only concept: README documents the statusLine settings.json snippet with --write-dashboard', () => {
+      const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+      assert(readme.includes('statusLine'), 'README must document the statusLine settings.json entry');
+      assert(readme.includes('--write-dashboard'), 'README statusLine snippet must include --write-dashboard');
+      assert(readme.includes('PROGRA~1'), 'README statusLine snippet must use 8.3 short paths');
+      assert(!/\/usage|\/tokens|skill|hooks\.json/i.test(readme), 'README must not reference /usage, /tokens, skills, or hooks.json');
     });
   });
 
@@ -1119,7 +1112,7 @@ async function runAllTests() {
       ];
       const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en' });
 
-      assert.strictEqual(payload.version, 1);
+      assert.strictEqual(payload.version, 2);
       assert(typeof payload.generatedAt === 'string');
       assert.strictEqual(payload.currency, 'usd');
       assert.strictEqual(payload.lang, 'en');
@@ -1164,7 +1157,7 @@ async function runAllTests() {
       const dataJs = fs.readFileSync(htmlReport.DASHBOARD_DATA_JS, 'utf8');
       assert(dataJs.startsWith('window.__AGY_DASH__'));
       const dataJson = JSON.parse(fs.readFileSync(htmlReport.DASHBOARD_DATA_JSON, 'utf8'));
-      assert.strictEqual(dataJson.version, 1);
+      assert.strictEqual(dataJson.version, 2);
     });
 
     await test('writeDashboardFiles should throttle unchanged payloads (skip)', () => {
@@ -1186,6 +1179,82 @@ async function runAllTests() {
       assert(fs.existsSync(htmlReport.DASHBOARD_HTML_FILE));
       const again = htmlReport.ensureDashboardHtml(payload, {});
       assert.strictEqual(again, false);
+    });
+
+    await test('buildDashboardPayload should emit per-model rows costed with each session model (W4)', () => {
+      const now = new Date().toISOString();
+      const sessions = [
+        {
+          sessionId: 'm1',
+          modelName: 'gemini-3-pro',
+          startTime: now,
+          inputTokens: 1000,
+          cachedTokens: 500,
+          outputTokens: 200,
+          turns: [
+            { createdAt: now, inputTokens: 1000, cachedTokens: 500, outputTokens: 200, costUsd: 0.01 }
+          ]
+        },
+        {
+          sessionId: 'm2',
+          modelName: 'gemini-3-flash',
+          startTime: now,
+          inputTokens: 300,
+          cachedTokens: 100,
+          outputTokens: 50,
+          turns: [
+            { createdAt: now, inputTokens: 300, cachedTokens: 100, outputTokens: 50, costUsd: 0.001 }
+          ]
+        }
+      ];
+      const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en' });
+
+      assert(Array.isArray(payload.models), 'payload.models must be an array');
+      assert.strictEqual(payload.models.length, 2);
+      const byModel = {};
+      for (const m of payload.models) byModel[m.model] = m;
+
+      const pro = byModel['gemini-3-pro'];
+      assert(pro, 'gemini-3-pro row missing');
+      assert.strictEqual(pro.totalTokens, 1700);
+      assert.strictEqual(pro.inputTokens, 1000);
+      assert.strictEqual(pro.cachedTokens, 500);
+      assert.strictEqual(pro.outputTokens, 200);
+      assert.strictEqual(pro.sessions, 1);
+      assert.strictEqual(pro.turns, 1);
+      assert(typeof pro.costUsd === 'number' && pro.costUsd > 0, 'per-model costUsd must be > 0');
+      assert(typeof pro.cacheSavingsUsd === 'number' && pro.cacheSavingsUsd >= 0);
+      assert(pro.cacheHitRate > 0 && pro.cacheHitRate <= 100);
+      assert(typeof pro.displayName === 'string' && pro.displayName.length > 0);
+
+      const flash = byModel['gemini-3-flash'];
+      assert(flash, 'gemini-3-flash row missing');
+      assert.strictEqual(flash.totalTokens, 450);
+      assert(typeof flash.costUsd === 'number' && flash.costUsd > 0);
+      // Per-session model costing: flash pricing differs from pro pricing
+      assert(flash.costUsd !== pro.costUsd, 'models must be costed with their own pricing');
+
+      // Sorted by cost desc
+      assert(payload.models[0].costUsd >= payload.models[1].costUsd);
+    });
+
+    await test('renderDashboardHtml should include the Models section with share bars', () => {
+      const now = new Date().toISOString();
+      const sessions = [
+        {
+          sessionId: 'm1',
+          modelName: 'gemini-3-pro',
+          startTime: now,
+          turns: [{ createdAt: now, inputTokens: 100, cachedTokens: 50, outputTokens: 20 }]
+        }
+      ];
+      const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      assert(html.includes('modelsWrap'), 'Models section container missing');
+      assert(html.includes('renderModels'), 'renderModels function missing');
+      assert(html.includes('share-bar'), 'share bar CSS missing');
+      assert(html.includes('modelsTitle'), 'modelsTitle i18n missing');
     });
   });
 
@@ -1338,7 +1407,7 @@ async function runAllTests() {
 
       assert.strictEqual(statusCode, 200);
       const parsed = JSON.parse(body);
-      assert.strictEqual(parsed.version, 1);
+      assert.strictEqual(parsed.version, 2);
 
       await serve.stopDashboardServer(info.server);
     });

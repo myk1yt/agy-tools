@@ -6,7 +6,7 @@
 [![i18n Supported](https://img.shields.io/badge/i18n-EN%20%7C%20KO%20%7C%20JA%20%7C%20ZH-orange.svg)](#internationalization-i18n)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#installation)
 
-**Antigravity Developer Toolkit (`agy-tools`)** is a zero-dependency CLI suite and lifecycle hook runner for **Antigravity CLI**. It features the **Token & Cost Dashboard (`dashboard`)**, providing real-time token tracking, prompt cache hit rate analytics, and exact API cost breakdowns across Gemini 3.7 Flash/Pro and Claude 3.7 Sonnet workflows.
+**Antigravity Developer Toolkit (`agy-tools`)** is a zero-dependency CLI suite for **Antigravity CLI**. Its flagship **agy-tokens** command is a **statusline-powered real-time token dashboard**. Zero agy modification: one `statusLine` entry in `~/.gemini/antigravity-cli/settings.json` is the ONLY integration point — providing real-time token tracking, prompt cache hit rate analytics, and exact API cost breakdowns across Gemini 3.7 Flash/Pro and Claude 3.7 Sonnet workflows.
 
 ---
 
@@ -18,7 +18,7 @@
 - 📊 **Rich ANSI Terminal Dashboard & Summary Cards**: Visual status cards, formatted daily breakdown tables with cache hit percentages, and turn-by-turn session inspection.
 - 🌐 **Full Multi-Language (i18n) Support**: Native auto-locale detection with manual `--lang` override supporting English (`en`), Korean (`ko`), Japanese (`ja`), and Chinese (`zh`).
 - 💱 **Multi-Currency Converter**: Real-time conversion to `USD ($)`, `KRW (₩)`, `JPY (¥)`, `EUR (€)`, and `GBP (£)`.
-- 🪝 **Antigravity Lifecycle Hook Integration**: Lightweight 1-line real-time status badges for Antigravity `PostInvocation` hooks and `/tokens` `/cost` `/dashboard` slash commands (note: `/usage` is reserved by agy for the built-in quota panel).
+- 🔗 **Statusline-Only Integration**: One `statusLine` entry in `~/.gemini/antigravity-cli/settings.json` — nothing inside agy is modified and no background processes run. The badge refreshes the browser dashboard data on every state change via `--write-dashboard`.
 - 🔒 **100% Privacy Preserving**: Zero network telemetry. All parsing and aggregation executes strictly on your local machine.
 
 ---
@@ -59,7 +59,7 @@
                  ┌─────────────────────────┴─────────────────────────┐
                  ▼                                                   ▼
    ┌───────────────────────────┐                       ┌───────────────────────────┐
-   │ Terminal Formatter (ANSI) │                       │ PostInvocation Hook Badge │
+   │ Terminal Formatter (ANSI) │                       │ Statusline Badge (--hook) │
    │ - Summary Cards & Tables  │                       │ ⚡ [Turn: 1.2k | Today:..]│
    └───────────────────────────┘                       └───────────────────────────┘
 ```
@@ -174,15 +174,15 @@ agy-tools dashboard --30d --lang zh
 agy-tools dashboard --today --json
 ```
 
-### 7. Real-Time Hook Badge (PostInvocation Contract)
+### 7. Real-Time Statusline Badge (`--hook`)
 ```bash
-# Official Antigravity PostInvocation hook output (JSON with injectSteps)
+# Statusline payload consumed by the agy statusline runner (JSON with injectSteps)
 agy-tokens --hook
 # Output: {"injectSteps":[{"ephemeralMessage":"⚡ [Antigravity] Turn: 1.8k ($0.0003) | Today: 64.2k ($0.0096) | Cache: 74%"}]}
 
-# Raw terminal string output (without JSON wrapper)
+# Raw terminal string output (without JSON wrapper) — what the statusline displays
 agy-tokens --hook --raw
-# Output: ⚡ [Antigravity] Turn: 1.8k ($0.0003) | Today: 64.2k ($0.0096) | Cache: 74%
+# Output: ⚡ [Antigravity] Turn: 1.8k ($0.0003) | Today: 64.2k ($0.0096) | Cache: 74% | 📊 Dashboard
 ```
 
 ### 8. Self-Refreshing HTML Dashboard (`--html`)
@@ -243,7 +243,7 @@ statusline the real-time data writer for the browser dashboard.
 | `--currency <code>` | | Select display currency (`usd`, `krw`, `jpy`, `eur`, `gbp`) |
 | `--lang <code>` | | Select interface language (`en`, `ko`, `ja`, `zh`) |
 | `--model <name>` | | Override model pricing (`gemini-3.7-flash`, `claude-3.7-sonnet`, etc.) |
-| `--hook`, `--badge` | | Output JSON matching Antigravity PostInvocation hook contract |
+| `--hook`, `--badge` | | Output the statusline badge payload (JSON, or raw string with `--raw`) |
 | `--raw` | | Output raw badge string without PostInvocation JSON wrapper |
 | `--json` | | Output pure JSON for programmatic integration |
 | `--fresh`, `--no-cache` | | Force full re-parsing of transcript files |
@@ -278,47 +278,25 @@ Pricing is configured per **1,000,000 tokens (USD)**:
 
 ---
 
-## 🪝 Antigravity Lifecycle Hook Integration
+## 🔗 Statusline Integration — The ONLY Integration Point
 
-To automatically display a real-time token and cost badge after every turn in Antigravity:
+**agy-tokens = statusline-powered real-time token dashboard. Zero agy modification: one `statusLine` entry in `~/.gemini/antigravity-cli/settings.json` is the ONLY integration point.**
 
-1. Copy [`integrations/hooks.json`](integrations/hooks.json) or add the `PostInvocation` configuration to your `~/.gemini/hooks.json`:
-```json
-{
-  "token-tracker": {
-    "PostInvocation": [
-      {
-        "type": "command",
-        "command": "agy-tokens --hook",
-        "timeout": 10
-      }
-    ]
-  }
-}
-```
+Add (or merge) this entry into `~/.gemini/antigravity-cli/settings.json` manually — the installer scripts print these instructions instead of editing your config:
 
-2. Add the token dashboard skills from [`integrations/skills/usage/SKILL.md`](integrations/skills/usage/SKILL.md) and [`integrations/skills/tokens/SKILL.md`](integrations/skills/tokens/SKILL.md) to `~/.gemini/skills/` (the installer scripts do this automatically).
-
-> ⚠️ **`/usage` is reserved by agy.** In agy ≥ 1.1.22, `/usage` is a **built-in system command** that shows the model quota panel (Gemini/Claude weekly + 5-hour limits). System slash commands take precedence over skill-derived slash commands, so a skill named `usage` will never be triggered by typing `/usage`.
->
-> **Working triggers for the token dashboard:**
-> - `/tokens` — instant dashboard (recommended)
-> - `/cost` — cost-focused view
-> - `/dashboard` — full dashboard
-> - Natural language: "오늘 토큰 사용량 알려줘", "how many tokens did I use today?"
->
-> The `usage` skill is still installed because it remains **model-invocable** when you ask about tokens/costs in plain language — it just cannot be triggered by the literal `/usage` slash command.
-
-3. *(Optional)* Live status badge in the agy status bar — add to `~/.gemini/antigravity-cli/settings.json`:
 ```json
 "statusLine": {
   "type": "command",
-  "command": "agy-tokens --hook --raw --write-dashboard",
+  "command": "C:\\PROGRA~1\\nodejs\\node.exe C:\\Users\\k1yt\\AppData\\Roaming\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard",
   "enabled": true,
   "stack_with_default": true
 }
 ```
-The statusline script receives the session JSON state on stdin and prints a one-line `⚡ [Antigravity]` badge ending with a clickable `📊 Dashboard` segment (OSC 8 hyperlink; Ctrl+Click opens the dashboard in your browser — degrades to plain text on terminals without OSC 8, or use `--no-link` to suppress). `--write-dashboard` also rewrites the dashboard data files on every state change, so the browser dashboard stays live with zero background processes. Run `agy-tokens --html` once to generate the initial dashboard.
+
+- The command uses **8.3 short paths with no inner quotes** so it survives cmd.exe parsing and npm global-path changes (`NODE_M~1` = `node_modules`, `AGY-TO~1` = the `agy-tools` package). Adjust the short paths if your Node/npm install locations differ (`dir /x` shows them).
+- The statusline script receives the session JSON state on stdin and prints a one-line `⚡ [Antigravity]` badge ending with a clickable `📊 Dashboard` segment (OSC 8 hyperlink; Ctrl+Click opens the dashboard in your browser — degrades to plain text on terminals without OSC 8, or use `--no-link` to suppress).
+- `--write-dashboard` rewrites the dashboard data files on **every state change** — more often than any lifecycle event — so the browser dashboard stays live with zero background processes. Run `agy-tokens --html` once to generate the initial dashboard.
+- Restart agy after saving `settings.json` to see the badge.
 
 ---
 

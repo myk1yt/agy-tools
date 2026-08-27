@@ -143,7 +143,9 @@ async function handlePostInvocation(options = {}) {
     isFree
   };
 
-  const badgeStr = renderRealTimeBadge(badgeData, currency, isFree);
+  // W1: optional OSC 8 link segment (📊 Dashboard) built by the CLI hook
+  // branch; null when --no-link or when the terminal cannot render OSC 8.
+  const badgeStr = renderRealTimeBadge(badgeData, currency, isFree, options.link || null);
   const hookResponse = formatHookResponse(badgeStr);
 
   return {

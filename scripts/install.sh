@@ -35,32 +35,27 @@ else
     echo "Make sure $USER_BIN is in your PATH."
 fi
 
-# Configure Gemini skills and hooks
-GEMINI_DIR="$HOME/.gemini"
-if [ -d "$GEMINI_DIR" ]; then
-    echo "[INFO] Configuring Gemini skill and hook integrations..."
-
-    mkdir -p "$GEMINI_DIR/skills/usage"
-    cp "$ROOT_DIR/integrations/skills/usage/SKILL.md" "$GEMINI_DIR/skills/usage/SKILL.md"
-
-    mkdir -p "$GEMINI_DIR/skills/tokens"
-    cp "$ROOT_DIR/integrations/skills/tokens/SKILL.md" "$GEMINI_DIR/skills/tokens/SKILL.md"
-
-    # Merge-safe hooks.json: only write if missing OR no "token-tracker" key (never clobber other hooks)
-    if [ ! -f "$GEMINI_DIR/hooks.json" ] || ! grep -q "token-tracker" "$GEMINI_DIR/hooks.json"; then
-        cp "$ROOT_DIR/integrations/hooks.json" "$GEMINI_DIR/hooks.json"
-        echo "[INFO] Installed token-tracker PostInvocation hook in $GEMINI_DIR/hooks.json"
-    else
-        echo "[INFO] Existing hooks.json already contains token-tracker; left untouched."
-    fi
-
-    echo "[SUCCESS] Configured usage + tokens skills and PostInvocation hook in $GEMINI_DIR"
-fi
-
 echo ""
+echo "[INFO] Statusline integration (the ONLY integration point — agy itself is never modified):"
+echo ""
+echo "  Add this entry to $HOME/.gemini/antigravity-cli/settings.json"
+echo "  (merge into the existing JSON object, then restart agy):"
+echo ""
+echo '  "statusLine": {'
+echo '    "type": "command",'
+echo '    "command": "C:\\PROGRA~1\\nodejs\\node.exe C:\\Users\\k1yt\\AppData\\Roaming\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard",'
+echo '    "enabled": true,'
+echo '    "stack_with_default": true'
+echo '  }'
+echo ""
+echo "  - The 8.3 short-path command above is the Windows form; on Linux/macOS use:"
+echo '      "command": "agy-tokens --hook --raw --write-dashboard"'
+echo "  - --write-dashboard refreshes the browser dashboard data on every state change."
+echo "  - Run \"agy-tokens --html\" once to generate the initial dashboard."
+echo ""
+
 echo "Try running:"
 echo "  agy-tools --version"
 echo "  agy-tools prices --currency krw"
 echo "  agy-tokens --help"
 echo ""
-
