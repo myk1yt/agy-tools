@@ -26,7 +26,7 @@ const {
   calculateCacheSavingsUsd
 } = require('./config');
 const { formatLocalDate, summarizeTurns } = require('./aggregator');
-const { t } = require('./i18n');
+const { t, getLocale, getAllTranslations } = require('./i18n');
 
 const DASHBOARD_PAYLOAD_VERSION = 2;
 const DASHBOARD_DEFAULT_REFRESH_SEC = 5;
@@ -92,6 +92,8 @@ function buildDashboardPayload(sessions, opts = {}) {
   const refDate = opts.refDate || new Date();
   const modelName = opts.modelName || null;
   const list = Array.isArray(sessions) ? sessions : [];
+  const lang = opts.lang || getLocale() || 'en';
+  const i18n = getAllTranslations(lang);
 
   // Date keys for the 30-day window (oldest -> newest)
   const dateKeys = [];
@@ -213,7 +215,8 @@ function buildDashboardPayload(sessions, opts = {}) {
     version: DASHBOARD_PAYLOAD_VERSION,
     generatedAt: new Date().toISOString(),
     currency: opts.currency || 'usd',
-    lang: opts.lang || 'en',
+    lang,
+    i18n,
     isFree: Boolean(opts.isFree),
     model: opts.model || '',
     models,
@@ -247,33 +250,36 @@ function jsonForScript(value) {
 
 /**
  * Builds the i18n dictionary embedded into the dashboard HTML.
+ * @param {string} [lang] - Optional locale override.
  * @returns {object}
  */
-function dashboardI18n() {
+function dashboardI18n(lang = null) {
+  const dict = getAllTranslations(lang);
   return {
-    dashboardTitle: t('dashboardTitle'),
-    summaryToday: t('summaryToday'),
-    summaryYesterday: t('summaryYesterday'),
-    summary7d: t('summary7d'),
-    summary30d: t('summary30d'),
-    chartTitle: t('chartTitle'),
-    tableTitle: t('tableTitle'),
-    modelsTitle: t('modelsTitle'),
-    modelColumn: t('modelColumn'),
-    lastUpdated: t('lastUpdated'),
-    liveStatus: t('liveStatus'),
-    noDataFound: t('noDataFound'),
-    freeCostLabel: t('freeCostLabel'),
-    colDate: t('colDate'),
-    colSessions: t('colSessions'),
-    colTurns: t('colTurns'),
-    colInput: t('colInput'),
-    colCached: t('colCached'),
-    colOutput: t('colOutput'),
-    colTotal: t('colTotal'),
-    colCacheHit: t('colCacheHit'),
-    colCost: t('colCost'),
-    colSavings: t('colSavings')
+    ...dict,
+    dashboardTitle: dict.dashboardTitle,
+    summaryToday: dict.summaryToday,
+    summaryYesterday: dict.summaryYesterday,
+    summary7d: dict.summary7d,
+    summary30d: dict.summary30d,
+    chartTitle: dict.chartTitle,
+    tableTitle: dict.tableTitle,
+    modelsTitle: dict.modelsTitle,
+    modelColumn: dict.modelColumn,
+    lastUpdated: dict.lastUpdated,
+    liveStatus: dict.liveStatus,
+    noDataFound: dict.noDataFound,
+    freeCostLabel: dict.freeCostLabel,
+    colDate: dict.colDate,
+    colSessions: dict.colSessions,
+    colTurns: dict.colTurns,
+    colInput: dict.colInput,
+    colCached: dict.colCached,
+    colOutput: dict.colOutput,
+    colTotal: dict.colTotal,
+    colCacheHit: dict.colCacheHit,
+    colCost: dict.colCost,
+    colSavings: dict.colSavings
   };
 }
 
@@ -311,10 +317,11 @@ function renderDashboardHtml(payload, opts = {}) {
   const refreshSec = Number(opts.refreshSec) > 0 ? Number(opts.refreshSec) : DASHBOARD_DEFAULT_REFRESH_SEC;
   const servePort = Number(opts.servePort) > 0 ? Number(opts.servePort) : DASHBOARD_DEFAULT_PORT;
   const sseUrl = `http://127.0.0.1:${servePort}/events`;
-  const i18nJson = jsonForScript(dashboardI18n());
+  const lang = String(payload.lang || getLocale() || 'en');
+  const initialI18n = payload.i18n || dashboardI18n(lang);
+  const i18nJson = jsonForScript(initialI18n);
   const fmtJson = jsonForScript(dashboardCurrencyFmt(payload.currency, payload.isFree));
   const payloadJson = jsonForScript(payload);
-  const lang = String(payload.lang || 'en');
 
   const clientScript = [
     "(function () {",
@@ -323,6 +330,34 @@ function renderDashboardHtml(payload, opts = {}) {
     `  var FMT = ${fmtJson};`,
     `  var REFRESH_MS = ${Math.round(refreshSec * 1000)};`,
     `  var SSE_URL = '${sseUrl}';`,
+    `  var currentLang = '${lang}';`,
+    "",
+    "  function updateI18N(p) {",
+    "    if (!p || !p.i18n) return;",
+    "    if (p.lang && p.lang !== currentLang) {",
+    "      currentLang = p.lang;",
+    "      document.documentElement.lang = p.lang;",
+    "    }",
+    "    for (var k in p.i18n) {",
+    "      if (Object.prototype.hasOwnProperty.call(p.i18n, k)) {",
+    "        I18N[k] = p.i18n[k];",
+    "      }",
+    "    }",
+    "    var el;",
+    "    if (I18N.dashboardTitle) {",
+    "      document.title = I18N.dashboardTitle;",
+    "      el = document.getElementById('dashTitle');",
+    "      if (el) el.textContent = '\\u{1F4CA} ' + I18N.dashboardTitle;",
+    "    }",
+    "    el = document.getElementById('chartTitle');",
+    "    if (el && I18N.chartTitle) el.textContent = I18N.chartTitle;",
+    "    el = document.getElementById('modelsTitle');",
+    "    if (el && I18N.modelsTitle) el.textContent = I18N.modelsTitle;",
+    "    el = document.getElementById('tableTitle');",
+    "    if (el && I18N.tableTitle) el.textContent = I18N.tableTitle;",
+    "    el = document.getElementById('empty');",
+    "    if (el && I18N.noDataFound) el.textContent = I18N.noDataFound;",
+    "  }",
     "",
     "  function esc(s) {",
     "    return String(s == null ? '' : s).replace(/[&<>\"']/g, function (c) {",
@@ -426,6 +461,7 @@ function renderDashboardHtml(payload, opts = {}) {
     "",
     "  function render(p) {",
     "    if (!p) return;",
+    "    updateI18N(p);",
     "    var s = p.summaries || {};",
     "    var cards = cardHtml(I18N.summaryToday, s.today) + cardHtml(I18N.summaryYesterday, s.yesterday) +",
     "      cardHtml(I18N.summary7d, s.last7d) + cardHtml(I18N.summary30d, s.last30d);",
@@ -487,7 +523,7 @@ function renderDashboardHtml(payload, opts = {}) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${t('dashboardTitle')}</title>
+<title>${t('dashboardTitle', {}, lang)}</title>
 <style>
 :root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#e6edf3;--dim:#8b949e;--accent:#58a6ff;--green:#3fb950}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -523,15 +559,15 @@ td.strong{font-weight:600}
 </head>
 <body>
 <header>
-  <h1>\u{1F4CA} ${t('dashboardTitle')}</h1>
+  <h1 id="dashTitle">\u{1F4CA} ${t('dashboardTitle', {}, lang)}</h1>
   <div class="meta"><span id="model"></span><span id="live" class="live"></span><span id="lastUpdated"></span></div>
 </header>
 <main>
   <section id="cards" class="cards"></section>
-  <section class="panel"><h2>${t('chartTitle')}</h2><div id="chart"></div></section>
-  <section class="panel"><h2>${t('modelsTitle')}</h2><div id="modelsWrap"></div></section>
-  <section class="panel"><h2>${t('tableTitle')}</h2><div id="tableWrap"></div></section>
-  <div id="empty">${t('noDataFound')}</div>
+  <section class="panel"><h2 id="chartTitle">${t('chartTitle', {}, lang)}</h2><div id="chart"></div></section>
+  <section class="panel"><h2 id="modelsTitle">${t('modelsTitle', {}, lang)}</h2><div id="modelsWrap"></div></section>
+  <section class="panel"><h2 id="tableTitle">${t('tableTitle', {}, lang)}</h2><div id="tableWrap"></div></section>
+  <div id="empty">${t('noDataFound', {}, lang)}</div>
 </main>
 <script>window.__AGY_DASH__ = ${payloadJson};</script>
 <script>
@@ -614,19 +650,33 @@ function writeDashboardFiles(payload, opts = {}) {
   // Cross-process skip: each statusline invocation is a fresh node process, so
   // the in-memory hash is always cold. Compare against the on-disk payload
   // (generatedAt excluded) to avoid rewriting identical data every turn.
+  let diskLangMismatch = false;
   let diskUnchanged = false;
   if (!force && !dataFilesMissing && dataChanged) {
     try {
       const diskJson = fs.readFileSync(DASHBOARD_DATA_JSON, 'utf8');
       const diskPayload = JSON.parse(diskJson);
       diskUnchanged = JSON.stringify({ ...diskPayload, generatedAt: null }) === hash;
+      diskLangMismatch = Boolean(diskPayload && diskPayload.lang && diskPayload.lang !== payload.lang);
     } catch (_err) {
       diskUnchanged = false;
+      diskLangMismatch = true;
     }
   }
 
-  const writeData = force || dataFilesMissing || (dataChanged && throttleOk && !diskUnchanged);
-  const writeHtml = force || htmlMissing;
+  let htmlLangMismatch = false;
+  if (!htmlMissing && payload.lang) {
+    try {
+      const htmlHead = fs.readFileSync(DASHBOARD_HTML_FILE, 'utf8').slice(0, 300);
+      htmlLangMismatch = !htmlHead.includes(`lang="${payload.lang}"`);
+    } catch (_err) {
+      htmlLangMismatch = true;
+    }
+  }
+
+  const localeMismatch = diskLangMismatch || htmlLangMismatch;
+  const writeData = force || dataFilesMissing || localeMismatch || (dataChanged && throttleOk && !diskUnchanged);
+  const writeHtml = force || htmlMissing || localeMismatch;
 
   const results = { html: false, dataJs: false, dataJson: false, skipped: false };
 

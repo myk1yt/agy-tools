@@ -549,18 +549,12 @@ let currentLocale = detectSystemLocale();
 
 /**
  * Automatically detects the user's system locale.
- * Priority: AGY_LANG -> LC_ALL -> LANG -> LANGUAGE -> Intl.DateTimeFormat -> fallback
+ * Priority: AGY_LANG -> Intl.DateTimeFormat -> LC_ALL -> LANG -> LANGUAGE -> fallback
  * @returns {string} One of supported locale codes.
  */
 function detectSystemLocale() {
-  const envLang =
-    process.env.AGY_LANG ||
-    process.env.LC_ALL ||
-    process.env.LANG ||
-    process.env.LANGUAGE;
-
-  if (envLang) {
-    const code = envLang.split('.')[0].split('_')[0].split('-')[0].toLowerCase();
+  if (process.env.AGY_LANG) {
+    const code = process.env.AGY_LANG.split('.')[0].split('_')[0].split('-')[0].toLowerCase();
     if (SUPPORTED_LOCALES.includes(code)) {
       return code;
     }
@@ -576,6 +570,18 @@ function detectSystemLocale() {
     }
   } catch (_err) {
     // Fallback if Intl API fails
+  }
+
+  const envLang =
+    process.env.LC_ALL ||
+    process.env.LANG ||
+    process.env.LANGUAGE;
+
+  if (envLang) {
+    const code = envLang.split('.')[0].split('_')[0].split('-')[0].toLowerCase();
+    if (SUPPORTED_LOCALES.includes(code)) {
+      return code;
+    }
   }
 
   return DEFAULT_LOCALE;
@@ -626,6 +632,21 @@ function t(key, params = {}, overrideLocale = null) {
   return template;
 }
 
+/**
+ * Gets all translations for a given locale (or the active locale), overlaid on default locale.
+ * @param {string} [locale] - Target locale code ('en', 'ko', 'ja', 'zh').
+ * @returns {object} Full translation dictionary.
+ */
+function getAllTranslations(locale = null) {
+  const loc = locale ? String(locale).toLowerCase().trim().split('-')[0] : currentLocale;
+  const dict = TRANSLATIONS[loc] || TRANSLATIONS[DEFAULT_LOCALE];
+  const all = Object.assign({}, TRANSLATIONS[DEFAULT_LOCALE], dict);
+  if (!all.colCache && all.colCached) {
+    all.colCache = all.colCached;
+  }
+  return all;
+}
+
 module.exports = {
   SUPPORTED_LOCALES,
   DEFAULT_LOCALE,
@@ -633,5 +654,7 @@ module.exports = {
   detectSystemLocale,
   setLocale,
   getLocale,
+  getAllTranslations,
   t
 };
+

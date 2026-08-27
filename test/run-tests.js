@@ -1256,6 +1256,90 @@ async function runAllTests() {
       assert(html.includes('share-bar'), 'share bar CSS missing');
       assert(html.includes('modelsTitle'), 'modelsTitle i18n missing');
     });
+
+    await test('buildDashboardPayload should include full i18n object for each supported locale', () => {
+      const keys = [
+        'dashboardTitle', 'summaryToday', 'summaryYesterday', 'summary7d', 'summary30d',
+        'chartTitle', 'tableTitle', 'modelsTitle', 'modelColumn', 'lastUpdated',
+        'noDataFound', 'colDate', 'colTokens', 'colCost', 'colSavings',
+        'colCache', 'colTotal', 'colSessions', 'colTurns', 'colModel'
+      ];
+
+      const payloadEn = htmlReport.buildDashboardPayload([], { lang: 'en' });
+      assert.strictEqual(payloadEn.lang, 'en');
+      assert(payloadEn.i18n && typeof payloadEn.i18n === 'object');
+      for (const k of keys) {
+        assert(payloadEn.i18n[k], `payloadEn.i18n.${k} should exist`);
+      }
+      assert.strictEqual(payloadEn.i18n.modelsTitle, 'Model Usage & Cost');
+
+      const payloadKo = htmlReport.buildDashboardPayload([], { lang: 'ko' });
+      assert.strictEqual(payloadKo.lang, 'ko');
+      for (const k of keys) {
+        assert(payloadKo.i18n[k], `payloadKo.i18n.${k} should exist`);
+      }
+      assert.strictEqual(payloadKo.i18n.modelsTitle, '모델별 사용량 & 비용');
+      assert.strictEqual(payloadKo.i18n.dashboardTitle, 'Antigravity 토큰 대시보드');
+
+      const payloadJa = htmlReport.buildDashboardPayload([], { lang: 'ja' });
+      assert.strictEqual(payloadJa.lang, 'ja');
+      for (const k of keys) {
+        assert(payloadJa.i18n[k], `payloadJa.i18n.${k} should exist`);
+      }
+      assert.strictEqual(payloadJa.i18n.modelsTitle, 'モデル別使用量 & コスト');
+
+      const payloadZh = htmlReport.buildDashboardPayload([], { lang: 'zh' });
+      assert.strictEqual(payloadZh.lang, 'zh');
+      for (const k of keys) {
+        assert(payloadZh.i18n[k], `payloadZh.i18n.${k} should exist`);
+      }
+      assert.strictEqual(payloadZh.i18n.modelsTitle, '模型使用量 & 成本');
+    });
+
+    await test('writeDashboardFiles should force regeneration on locale change', () => {
+      htmlReport.resetDashboardWriteState();
+      const payloadEn = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      htmlReport.writeDashboardFiles(payloadEn, { force: true });
+
+      // Check initial write is English
+      const initialHtml = fs.readFileSync(htmlReport.DASHBOARD_HTML_FILE, 'utf8');
+      assert(initialHtml.includes('lang="en"'));
+      assert(initialHtml.includes('Antigravity Token Dashboard'));
+
+      // Second write with different locale (Korean) without force: should trigger write due to locale mismatch
+      const payloadKo = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'ko' });
+      const res = htmlReport.writeDashboardFiles(payloadKo, {});
+
+      assert.strictEqual(res.html, true, 'HTML should be regenerated on locale change');
+      assert.strictEqual(res.dataJs, true, 'dataJs should be written on locale change');
+      assert.strictEqual(res.dataJson, true, 'dataJson should be written on locale change');
+      assert.strictEqual(res.skipped, false, 'Should not be skipped when locale changes');
+
+      const koHtml = fs.readFileSync(htmlReport.DASHBOARD_HTML_FILE, 'utf8');
+      assert(koHtml.includes('lang="ko"'));
+      assert(koHtml.includes('Antigravity 토큰 대시보드'));
+
+      const koJson = JSON.parse(fs.readFileSync(htmlReport.DASHBOARD_DATA_JSON, 'utf8'));
+      assert.strictEqual(koJson.lang, 'ko');
+      assert.strictEqual(koJson.i18n.modelsTitle, '모델별 사용량 & 비용');
+
+      // Third write with same locale should be skipped
+      const res2 = htmlReport.writeDashboardFiles(payloadKo, {});
+      assert.strictEqual(res2.skipped, true, 'Subsequent write with same locale should be skipped');
+    });
+
+    await test('renderDashboardHtml should include updateI18N function and lang attribute', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'ko' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      assert(html.includes('<html lang="ko">'));
+      assert(html.includes('updateI18N('));
+      assert(html.includes('currentLang'));
+      assert(html.includes('id="dashTitle"'));
+      assert(html.includes('id="chartTitle"'));
+      assert(html.includes('id="modelsTitle"'));
+      assert(html.includes('id="tableTitle"'));
+    });
   });
 
   // --- Suite 16: OSC 8 & New CLI Flags Unit Tests ---
