@@ -1,0 +1,256 @@
+# ⚡ Antigravity Token & Cost Tracker (`agy-tokens`)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20(Pure%20Node.js)-brightgreen.svg)](#zero-dependency-architecture)
+[![Node.js Version](https://img.shields.io/badge/Node.js-%3E%3D16.0.0-green.svg)](https://nodejs.org)
+[![i18n Supported](https://img.shields.io/badge/i18n-EN%20%7C%20KO%20%7C%20JA%20%7C%20ZH-orange.svg)](#internationalization-i18n)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#installation)
+
+**Antigravity Token & Cost Tracker** is a zero-dependency CLI utility and lifecycle hook handler designed to provide real-time token tracking, prompt cache hit rate analytics, and exact API cost breakdowns for **Antigravity CLI** and modern LLM workflows (Google Gemini 3.7 Flash / Pro, Anthropic Claude 3.7 Sonnet).
+
+---
+
+## 🌟 Key Features
+
+- ⚡ **Zero External Dependencies**: Built 100% on native Node.js core modules (`fs`, `path`, `readline`, `os`, `crypto`, `util`). No `node_modules` required.
+- 🎯 **High-Precision Subword BPE Tokenizer**: Accurately tokenizes and estimates consumption across programming languages (Dart, Python, JavaScript/TypeScript, Rust, Go, C++, SQL) and human languages (English, Korean, Japanese, Chinese).
+- 🚀 **Sub-10ms Incremental Cache Engine**: Uses atomic JSON cache (`~/.gemini/token_tracker_cache.json`) with file `mtime` change detection to parse hundreds of conversation transcripts in milliseconds.
+- 📊 **Rich ANSI Terminal UI & Summary Cards**: Visual status cards, formatted daily breakdown tables with cache hit percentages, and turn-by-turn session inspection.
+- 🌐 **Full Multi-Language (i18n) Support**: Native auto-locale detection with manual `--lang` override supporting English (`en`), Korean (`ko`), Japanese (`ja`), and Chinese (`zh`).
+- 💱 **Multi-Currency Converter**: Real-time conversion to `USD ($)`, `KRW (₩)`, `JPY (¥)`, `EUR (€)`, and `GBP (£)`.
+- 🪝 **Antigravity Lifecycle Hook Integration**: Provides lightweight 1-line real-time status badges for Antigravity `PostInvocation` hooks and the `/usage` slash command.
+- 🔒 **100% Privacy Preserving**: Zero network telemetry. All parsing and aggregation executes strictly on your local machine.
+
+---
+
+## 🏗 Architecture Overview
+
+```
+                           ┌───────────────────────────────┐
+                           │   Antigravity CLI Session    │
+                           │   (~/.gemini/antigravity-cli) │
+                           └───────────────┬───────────────┘
+                                           │
+                        ┌──────────────────┴──────────────────┐
+                        ▼                                     ▼
+             ┌─────────────────────┐               ┌─────────────────────┐
+             │ transcript.jsonl    │               │    history.jsonl    │
+             │ (Turn-by-turn logs) │               │ (Session metadata)  │
+             └──────────┬──────────┘               └──────────┬──────────┘
+                        │                                     │
+                        └──────────────────┬──────────────────┘
+                                           ▼
+                           ┌───────────────────────────────┐
+                           │   Log Parser (src/log-parser) │
+                           │   - BPE Tokenizer             │
+                           │   - Prompt Cache Calculation  │
+                           └───────────────┬───────────────┘
+                                           ▼
+                           ┌───────────────────────────────┐
+                           │ Incremental Cache Manager     │
+                           │ (~/.gemini/token_tracker_cache│
+                           └───────────────┬───────────────┘
+                                           ▼
+                           ┌───────────────────────────────┐
+                           │ Aggregator (src/aggregator)   │
+                           │ (Today / 7d / 30d / Range)    │
+                           └───────────────┬───────────────┘
+                                           ▼
+                 ┌─────────────────────────┴─────────────────────────┐
+                 ▼                                                   ▼
+   ┌───────────────────────────┐                       ┌───────────────────────────┐
+   │ Terminal Formatter (ANSI) │                       │ PostInvocation Hook Badge │
+   │ - Summary Cards & Tables  │                       │ ⚡ [Turn: 1.2k | Today:..]│
+   └───────────────────────────┘                       └───────────────────────────┘
+```
+
+---
+
+## 📦 Installation
+
+### Option 1: Global NPM Link (Recommended)
+
+```bash
+git clone https://github.com/k1yt/Antigravity-cli.git
+cd Antigravity-cli
+npm link
+```
+
+### Option 2: One-Click Installer Scripts
+
+**On Windows (Command Prompt / PowerShell):**
+```cmd
+scripts\install.bat
+```
+
+**On Linux / macOS:**
+```bash
+chmod +x scripts/install.sh
+./scripts/install.sh
+```
+
+---
+
+## 🚀 CLI Usage & Examples
+
+```bash
+agy-tokens [options]
+```
+
+### 1. Daily Usage Summary (Default)
+```bash
+agy-tokens
+# or explicitly:
+agy-tokens --today
+```
+
+**Sample Output:**
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ⚡ Antigravity Token & Cost Tracker  High-Precision Token Analytics┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+┃  Period: Today (2026-08-27)  |  Active Model: Gemini 3.7 Flash     ┃
+┃  Currency: USD ($)  |  Locale: EN                                  ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+┌─────────────────────────────────┐  ┌─────────────────────────────────┐
+│ Total Tokens                    │  │ Total Estimated Cost            │
+│ 3,080,080 (3.08M)               │  │ $0.577 (Cache Savings: $0.246)  │
+├─────────────────────────────────┤  ├─────────────────────────────────┤
+│ Input Tokens: 91,800            │  │ Total Sessions: 25              │
+│ Cached Tokens: 2,185,527        │  │ Total Turns: 1,835              │
+│ Output Tokens: 802,753          │  │ Avg Tokens / Turn: 1.7k         │
+│ Cache Hit Rate: 96.0%           │  │ Cache Savings: $0.246           │
+└─────────────────────────────────┘  └─────────────────────────────────┘
+```
+
+### 2. 7-Day & 30-Day Breakdown Table
+```bash
+# 7-day breakdown in Korean Won (KRW)
+agy-tokens --7d --currency krw
+
+# 30-day breakdown in US Dollars
+agy-tokens --30d --currency usd
+```
+
+**Sample Table:**
+```
+┌────────────┬──────┬──────┬──────────┬──────────┬─────────┬───────────┬────────┬───────────┬──────────┐
+│    Date    │Sess. │Turns │  Input   │  Cached  │ Output  │   Total   │ Cache% │   Cost    │ Savings  │
+├────────────┼──────┼──────┼──────────┼──────────┼─────────┼───────────┼────────┼───────────┼──────────┤
+│ 2026-08-25 │    45│  2938│    185.9k│     4.23M│    1.43M│      5.84M│     96%│     ₩1,511│      ₩689│
+│ 2026-08-26 │    31│  3151│    143.3k│    11.86M│    1.38M│     13.38M│     99%│     ₩1,875│    ₩1,934│
+│ 2026-08-27 │    25│  1829│     91.8k│     2.19M│   800.8k│      3.08M│     96%│       ₩836│      ₩357│
+├────────────┼──────┼──────┼──────────┼──────────┼─────────┼───────────┼────────┼───────────┼──────────┤
+│ GRAND TOTAL│   187│ 17051│    841.1k│    33.80M│    7.88M│     42.52M│     98%│     ₩8,878│    ₩5,513│
+└────────────┴──────┴──────┴──────────┴──────────┴─────────┴───────────┴────────┴───────────┴──────────┘
+```
+
+### 3. Custom Date Range Aggregation
+```bash
+agy-tokens --range 2026-08-01..2026-08-27 --currency eur
+```
+
+### 4. Turn-by-Turn Session Drilldown
+```bash
+# Inspect the most recent active session
+agy-tokens --session
+
+# Inspect a specific session ID
+agy-tokens --session 0048f579
+```
+
+### 5. Multi-Language CLI Output
+```bash
+agy-tokens --7d --lang ko
+agy-tokens --today --lang ja
+agy-tokens --30d --lang zh
+```
+
+### 6. Programmatic JSON Output
+```bash
+agy-tokens --today --json
+```
+
+### 7. Real-Time Hook Badge (1-Line)
+```bash
+agy-tokens --hook
+# Output: ⚡ [Antigravity] Turn: 1.8k ($0.0003) | Today: 64.2k ($0.0096) | Cache: 74%
+```
+
+---
+
+## 🎛 Command Line Options Reference
+
+| Option | Shorthand | Description |
+| :--- | :--- | :--- |
+| `--today` | `-t` | Show today's usage summary *(default)* |
+| `--yesterday` | `-y` | Show yesterday's usage summary |
+| `--7d`, `--week` | | Show 7-day daily breakdown table and grand total |
+| `--30d`, `--month` | | Show 30-day daily breakdown table and grand total |
+| `--range <start..end>` | | Show aggregation for custom date range (`YYYY-MM-DD..YYYY-MM-DD`) |
+| `--session [id]` | `-s` | Show turn-by-turn table for latest or specified conversation ID |
+| `--all` | `-a` | Show full historical breakdown across all recorded sessions |
+| `--currency <code>` | | Select display currency (`usd`, `krw`, `jpy`, `eur`, `gbp`) |
+| `--lang <code>` | | Select interface language (`en`, `ko`, `ja`, `zh`) |
+| `--model <name>` | | Override model pricing (`gemini-3.7-flash`, `claude-3.7-sonnet`, etc.) |
+| `--hook`, `--badge` | | Output compact 1-line real-time status badge for lifecycle hooks |
+| `--json` | | Output pure JSON for programmatic integration |
+| `--fresh`, `--no-cache` | | Force full re-parsing of transcript files |
+| `--no-color` | | Disable ANSI terminal colors |
+| `--help` | `-h` | Display help screen |
+| `--version` | `-v` | Display version number |
+
+---
+
+## 💰 Supported Models & Pricing Tiers
+
+Pricing is configured per **1,000,000 tokens (USD)**:
+
+| Model Identifier | Input / 1M | Cached Input / 1M | Output / 1M |
+| :--- | :---: | :---: | :---: |
+| **Gemini 3.7 Flash** | `$0.1500` | `$0.0375` *(75% off)* | `$0.6000` |
+| **Gemini 2.5 Flash** | `$0.1500` | `$0.0375` *(75% off)* | `$0.6000` |
+| **Gemini 2.5 Pro** | `$1.2500` | `$0.3125` *(75% off)* | `$5.0000` |
+| **Claude 3.7 Sonnet** | `$3.0000` | `$0.3000` *(90% off)* | `$15.0000` |
+
+*Custom pricing and currency exchange rates can be defined in `~/.gemini/antigravity_tokens.json`.*
+
+---
+
+## 🪝 Antigravity Lifecycle Hook Integration
+
+To automatically display a real-time token and cost badge after every turn in Antigravity:
+
+1. Copy [`integrations/hooks.json`](integrations/hooks.json) or add the `PostInvocation` configuration to your Antigravity hooks settings:
+```json
+{
+  "hooks": {
+    "PostInvocation": {
+      "enabled": true,
+      "command": "agy-tokens",
+      "args": ["--hook"]
+    }
+  }
+}
+```
+
+2. Add the `/usage` slash command skill from [`integrations/skills/usage/SKILL.md`](integrations/skills/usage/SKILL.md).
+
+---
+
+## 🧪 Running Tests
+
+Execute the comprehensive zero-dependency test suite:
+
+```bash
+npm test
+# or
+node test/run-tests.js
+```
+
+---
+
+## 📄 License
+
+MIT License © 2026 k1yt. See [LICENSE](LICENSE) for details.
