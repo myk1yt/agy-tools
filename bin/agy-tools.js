@@ -46,7 +46,6 @@ function printToolkitHelp() {
   --json                      Raw JSON output
 
 \x1b[1mExamples:\x1b[0m
-  $ agy-tools
   $ agy-tools prices --currency krw
   $ agy-tools prices --lang ko
   $ agy-tools sync-prices
@@ -62,12 +61,12 @@ async function main() {
   const args = process.argv.slice(2);
   const firstArg = (args[0] || '').toLowerCase();
 
-  if (firstArg === 'help' && args.length === 1) {
+  if ((firstArg === 'help' || firstArg === '--help' || firstArg === '-h') && args.length === 1) {
     printToolkitHelp();
     return;
   }
 
-  if (firstArg === 'version' && args.length === 1) {
+  if (firstArg === 'version' || firstArg === '--version' || firstArg === '-v') {
     console.log(`agy-tools v${pkg.version}`);
     return;
   }
