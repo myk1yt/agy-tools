@@ -1103,6 +1103,247 @@ async function runAllTests() {
     });
   });
 
+  // --- Suite 15: HTML Dashboard Report Unit Tests ---
+  await describe('15. HTML Dashboard Report Unit Tests', async () => {
+    const htmlReport = require('../src/html-report');
+
+    await test('buildDashboardPayload should produce the DashboardPayload schema', () => {
+      const sessions = [
+        {
+          sessionId: 's1',
+          startTime: new Date().toISOString(),
+          turns: [
+            { createdAt: new Date().toISOString(), inputTokens: 100, cachedTokens: 50, outputTokens: 20, costUsd: 0.01 }
+          ]
+        }
+      ];
+      const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en' });
+
+      assert.strictEqual(payload.version, 1);
+      assert(typeof payload.generatedAt === 'string');
+      assert.strictEqual(payload.currency, 'usd');
+      assert.strictEqual(payload.lang, 'en');
+      assert(typeof payload.isFree === 'boolean');
+      assert(payload.summaries && payload.summaries.today && payload.summaries.yesterday);
+      assert(payload.summaries.last7d && payload.summaries.last30d);
+      assert.strictEqual(payload.summaries.today.totalTokens, 170);
+      assert(Array.isArray(payload.daily) && payload.daily.length === 30);
+      const row = payload.daily[payload.daily.length - 1];
+      assert.strictEqual(row.date, aggregator.formatLocalDate(new Date()));
+      assert.strictEqual(row.totalTokens, 170);
+      assert(payload.cacheStats && payload.cacheStats.totalSessions === 1);
+    });
+
+    await test('renderDashboardHtml should embed payload, polling script, and SSE upgrade', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      assert(html.includes('<!DOCTYPE html>'));
+      assert(html.includes('window.__AGY_DASH__'));
+      assert(html.includes('dashboard-data.js?v='));
+      assert(html.includes('EventSource'));
+      assert(html.includes('http://127.0.0.1:8787/events'));
+      assert(html.includes('<svg'));
+      assert(html.includes('setInterval'));
+      // C3: no fetch() usage in the client script
+      assert(!html.includes('fetch('));
+    });
+
+    await test('writeDashboardFiles should atomically write all 3 artifacts (force mode)', () => {
+      htmlReport.resetDashboardWriteState();
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const res = htmlReport.writeDashboardFiles(payload, { force: true });
+
+      assert.strictEqual(res.html, true);
+      assert.strictEqual(res.dataJs, true);
+      assert.strictEqual(res.dataJson, true);
+      assert(fs.existsSync(htmlReport.DASHBOARD_HTML_FILE));
+      assert(fs.existsSync(htmlReport.DASHBOARD_DATA_JS));
+      assert(fs.existsSync(htmlReport.DASHBOARD_DATA_JSON));
+
+      const dataJs = fs.readFileSync(htmlReport.DASHBOARD_DATA_JS, 'utf8');
+      assert(dataJs.startsWith('window.__AGY_DASH__'));
+      const dataJson = JSON.parse(fs.readFileSync(htmlReport.DASHBOARD_DATA_JSON, 'utf8'));
+      assert.strictEqual(dataJson.version, 1);
+    });
+
+    await test('writeDashboardFiles should throttle unchanged payloads (skip)', () => {
+      htmlReport.resetDashboardWriteState();
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      htmlReport.writeDashboardFiles(payload, { force: true });
+      const res = htmlReport.writeDashboardFiles(payload, {});
+      assert.strictEqual(res.skipped, true);
+    });
+
+    await test('ensureDashboardHtml should self-heal missing HTML only', () => {
+      htmlReport.resetDashboardWriteState();
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      // Ensure present, then delete to simulate E13
+      htmlReport.writeDashboardFiles(payload, { force: true });
+      fs.unlinkSync(htmlReport.DASHBOARD_HTML_FILE);
+      const healed = htmlReport.ensureDashboardHtml(payload, {});
+      assert.strictEqual(healed, true);
+      assert(fs.existsSync(htmlReport.DASHBOARD_HTML_FILE));
+      const again = htmlReport.ensureDashboardHtml(payload, {});
+      assert.strictEqual(again, false);
+    });
+  });
+
+  // --- Suite 16: OSC 8 & New CLI Flags Unit Tests ---
+  await describe('16. OSC 8 & New CLI Flags Unit Tests', async () => {
+    const osc8 = require('../src/osc8');
+
+    await test('formatOsc8Link should wrap label with OSC 8 escape pairs', () => {
+      const linked = osc8.formatOsc8Link('file:///C:/test/dashboard.html', 'Dashboard');
+      assert(linked.includes('\x1b]8;;file:///C:/test/dashboard.html\x07'));
+      assert(linked.includes('Dashboard'));
+      assert(linked.endsWith('\x1b]8;;\x07'));
+    });
+
+    await test('formatOsc8Link should degrade to plain label when unsupported', () => {
+      const prevNoColor = process.env.NO_COLOR;
+      process.env.NO_COLOR = '1';
+      const plain = osc8.formatOsc8Link('file:///C:/test/dashboard.html', 'Dashboard');
+      assert.strictEqual(plain, 'Dashboard');
+      if (prevNoColor === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = prevNoColor;
+    });
+
+    await test('dashboardFileUrl should return a file:// URL of dashboard.html', () => {
+      const url = osc8.dashboardFileUrl();
+      assert(url.startsWith('file://'));
+      assert(url.includes('dashboard.html'));
+    });
+
+    await test('parseArgs should parse --html/--dashboard flags', () => {
+      const optsHtml = parseArgs(['node', 'bin/agy-tokens.js', '--html']);
+      assert.strictEqual(optsHtml.html, true);
+      assert.strictEqual(optsHtml.today, false);
+
+      const optsDash = parseArgs(['node', 'bin/agy-tokens.js', '--dashboard']);
+      assert.strictEqual(optsDash.html, true);
+    });
+
+    await test('parseArgs should parse --serve, --port, --open, --write-dashboard, --no-link, --refresh', () => {
+      const optsServe = parseArgs(['node', 'bin/agy-tokens.js', '--serve', '8787']);
+      assert.strictEqual(optsServe.serve, true);
+      assert.strictEqual(optsServe.servePort, 8787);
+
+      const optsServeEq = parseArgs(['node', 'bin/agy-tokens.js', '--serve=9000']);
+      assert.strictEqual(optsServeEq.serve, true);
+      assert.strictEqual(optsServeEq.servePort, 9000);
+
+      const optsPort = parseArgs(['node', 'bin/agy-tokens.js', '--serve', '--port', '0']);
+      assert.strictEqual(optsPort.serve, true);
+      assert.strictEqual(optsPort.servePort, 0);
+
+      const optsOpen = parseArgs(['node', 'bin/agy-tokens.js', '--html', '--open']);
+      assert.strictEqual(optsOpen.open, true);
+
+      const optsWrite = parseArgs(['node', 'bin/agy-tokens.js', '--hook', '--raw', '--write-dashboard']);
+      assert.strictEqual(optsWrite.hook, true);
+      assert.strictEqual(optsWrite.raw, true);
+      assert.strictEqual(optsWrite.writeDashboard, true);
+
+      const optsNoLink = parseArgs(['node', 'bin/agy-tokens.js', '--hook', '--raw', '--no-link']);
+      assert.strictEqual(optsNoLink.noLink, true);
+
+      const optsRefresh = parseArgs(['node', 'bin/agy-tokens.js', '--html', '--refresh', '10']);
+      assert.strictEqual(optsRefresh.refreshSec, 10);
+    });
+
+    await test('renderRealTimeBadge should append link segment and stay single-line', () => {
+      const badgeData = { turnTokens: 100, turnCostUsd: 0.001, todayTokens: 1000, todayCostUsd: 0.01, cacheHitRate: 99 };
+      const base = formatter.renderRealTimeBadge(badgeData, 'usd', false);
+      assert(!base.includes('Dashboard'));
+
+      const linked = formatter.renderRealTimeBadge(badgeData, 'usd', false, '📊 Dashboard');
+      assert(linked.includes('📊 Dashboard'));
+      assert(!linked.includes('\n'));
+    });
+
+    await test('renderHelp should include dashboard flags', () => {
+      const help = formatter.renderHelp();
+      assert(help.includes('--html'));
+      assert(help.includes('--serve'));
+      assert(help.includes('--write-dashboard'));
+      assert(help.includes('--no-link'));
+    });
+  });
+
+  // --- Suite 17: Dashboard SSE Server Unit Tests (ephemeral) ---
+  await describe('17. Dashboard SSE Server Unit Tests (ephemeral)', async () => {
+    const serve = require('../src/serve');
+
+    await test('startDashboardServer should bind 127.0.0.1 and stream SSE events', async () => {
+      const info = await serve.startDashboardServer({ port: 0, intervalMs: 200 });
+
+      assert(info.url.startsWith('http://127.0.0.1:'));
+      assert(info.port > 0);
+
+      const eventsBody = await new Promise((resolve) => {
+        let settled = false;
+        const finish = (val) => {
+          if (settled) return;
+          settled = true;
+          resolve(val);
+        };
+        const req = http.get(`${info.url.replace(/\/$/, '')}/events`, (res) => {
+          let body = '';
+          res.on('data', (chunk) => {
+            body += chunk.toString();
+            if (body.includes('data:')) {
+              req.destroy();
+              finish(body);
+            }
+          });
+          res.on('error', () => finish(body));
+        });
+        req.on('error', () => finish(''));
+        setTimeout(() => finish(''), 5000);
+      });
+
+      assert(eventsBody.includes('data:'), 'SSE stream should push data events');
+
+      await serve.stopDashboardServer(info.server);
+    });
+
+    await test('GET / should serve dashboard.html with no-store', async () => {
+      const info = await serve.startDashboardServer({ port: 0, intervalMs: 60000 });
+
+      const { statusCode, headers, body } = await new Promise((resolve, reject) => {
+        http.get(info.url, (res) => {
+          let body = '';
+          res.on('data', (c) => { body += c; });
+          res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, body }));
+        }).on('error', reject);
+      });
+
+      assert.strictEqual(statusCode, 200);
+      assert.strictEqual(headers['cache-control'], 'no-store');
+      assert(body.includes('<!DOCTYPE html>'));
+
+      await serve.stopDashboardServer(info.server);
+    });
+
+    await test('GET /data.json should serve valid payload JSON', async () => {
+      const info = await serve.startDashboardServer({ port: 0, intervalMs: 60000 });
+
+      const { statusCode, body } = await new Promise((resolve, reject) => {
+        http.get(`${info.url.replace(/\/$/, '')}/data.json`, (res) => {
+          let body = '';
+          res.on('data', (c) => { body += c; });
+          res.on('end', () => resolve({ statusCode: res.statusCode, body }));
+        }).on('error', reject);
+      });
+
+      assert.strictEqual(statusCode, 200);
+      const parsed = JSON.parse(body);
+      assert.strictEqual(parsed.version, 1);
+
+      await serve.stopDashboardServer(info.server);
+    });
+  });
+
   // --- Summary & Exit Code ---
   const duration = Date.now() - startTime;
   console.log('\n\x1b[1m=======================================================');

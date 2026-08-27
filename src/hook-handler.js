@@ -91,7 +91,10 @@ function formatHookResponse(badge) {
  * @param {boolean} [options.isFree=false] - Free quota flag.
  * @param {string} [options.conversationId] - Optional active conversation UUID.
  * @param {object} [options.stdinContext] - Optional parsed stdin payload.
- * @returns {Promise<{ badge: string, turnTokens: number, turnCostUsd: number, todayTokens: number, todayCostUsd: number, cacheHitRate: number, isFree: boolean, injectSteps: Array<{ ephemeralMessage: string }> }>}
+ * @param {Array<object>} [options.sessions] - Optional pre-synced sessions array.
+ *   When provided, the internal syncSessions() call is skipped (C4: the caller
+ *   shares ONE sync pass between the badge and the dashboard writer).
+ * @returns {Promise<{ badge: string, turnTokens: number, turnCostUsd: number, todayTokens: number, todayCostUsd: number, cacheHitRate: number, isFree: boolean, sessions: Array<object>|null, injectSteps: Array<{ ephemeralMessage: string }> }>}
  */
 async function handlePostInvocation(options = {}) {
   const currency = options.currency || 'usd';
@@ -105,7 +108,10 @@ async function handlePostInvocation(options = {}) {
 
   const conversationId = options.conversationId || (options.stdinContext ? options.stdinContext.conversationId : null);
 
-  const { sessions } = await syncSessions({ modelName });
+  let sessions = Array.isArray(options.sessions) ? options.sessions : null;
+  if (!sessions) {
+    sessions = (await syncSessions({ modelName })).sessions;
+  }
   const todaySummary = getToday(sessions, new Date(), modelName);
 
   let latestTurn = null;
@@ -143,6 +149,7 @@ async function handlePostInvocation(options = {}) {
   return {
     badge: badgeStr,
     ...badgeData,
+    sessions,
     ...hookResponse
   };
 }

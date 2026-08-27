@@ -4,6 +4,7 @@
  * i18n, and ANSI terminal rendering.
  */
 
+const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 const i18n = require('./i18n');
@@ -14,6 +15,9 @@ const aggregator = require('./aggregator');
 const formatter = require('./formatter');
 const hookHandler = require('./hook-handler');
 const priceSyncer = require('./price-syncer');
+const htmlReport = require('./html-report');
+const serve = require('./serve');
+const { dashboardFileUrl } = require('./osc8');
 
 const pkg = require('../package.json');
 
@@ -46,7 +50,14 @@ function parseArgs(argv) {
     autoSync: false,
     noColor: false,
     help: false,
-    version: false
+    version: false,
+    html: false,
+    serve: false,
+    servePort: null,
+    open: false,
+    writeDashboard: false,
+    noLink: false,
+    refreshSec: null
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -111,6 +122,34 @@ function parseArgs(argv) {
       options.prices = true;
     } else if (arg === '--auto-sync') {
       options.autoSync = true;
+    } else if (arg === '--html' || arg === '--dashboard') {
+      options.html = true;
+    } else if (arg === '--serve') {
+      options.serve = true;
+      // Optional inline port: --serve 8787
+      if (args[i + 1] && /^\d+$/.test(args[i + 1])) {
+        options.servePort = parseInt(args[i + 1], 10);
+        i++;
+      }
+    } else if (arg.startsWith('--serve=')) {
+      options.serve = true;
+      options.servePort = parseInt(arg.split('=')[1], 10) || null;
+    } else if (arg === '--port') {
+      options.servePort = parseInt(args[i + 1], 10);
+      i++;
+    } else if (arg.startsWith('--port=')) {
+      options.servePort = parseInt(arg.split('=')[1], 10);
+    } else if (arg === '--open') {
+      options.open = true;
+    } else if (arg === '--write-dashboard') {
+      options.writeDashboard = true;
+    } else if (arg === '--no-link') {
+      options.noLink = true;
+    } else if (arg === '--refresh') {
+      options.refreshSec = parseInt(args[i + 1], 10);
+      i++;
+    } else if (arg.startsWith('--refresh=')) {
+      options.refreshSec = parseInt(arg.split('=')[1], 10);
     } else if (arg === '--no-color') {
       options.noColor = true;
     }
@@ -127,6 +166,8 @@ function parseArgs(argv) {
     !options.hook &&
     !options.sync &&
     !options.prices &&
+    !options.html &&
+    !options.serve &&
     !options.help &&
     !options.version
   ) {
@@ -134,6 +175,27 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+/**
+ * Opens a URL in the default browser (Windows-first, POSIX-safe).
+ * @param {string} url - URL to open.
+ */
+function openInBrowser(url) {
+  try {
+    if (process.platform === 'win32') {
+      const { spawn } = require('child_process');
+      spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref();
+    } else if (process.platform === 'darwin') {
+      const { exec } = require('child_process');
+      exec(`open ${JSON.stringify(url)}`);
+    } else {
+      const { exec } = require('child_process');
+      exec(`xdg-open ${JSON.stringify(url)}`);
+    }
+  } catch (_err) {
+    // Non-fatal: user can open the printed URL manually
+  }
 }
 
 /**
@@ -214,16 +276,104 @@ async function runCli(argv = process.argv) {
     return;
   }
 
-  // 3. Hook / 1-line badge mode
+  // 3a. Dashboard HTML generation mode (--html / --dashboard)
+  if (options.html) {
+    const activeModel = options.model || config.getActiveModelFromSettings();
+    const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
+    const syncResult = await cacheManager.syncSessions({
+      forceFresh: options.fresh,
+      modelName: activeModel
+    });
+    const payload = htmlReport.buildDashboardPayload(syncResult.sessions, {
+      currency,
+      lang: targetLang || i18n.getLocale(),
+      isFree,
+      model: activeModel,
+      modelName: activeModel,
+      parsedCount: syncResult.parsedCount,
+      cachedCount: syncResult.cachedCount,
+      elapsedMs: syncResult.elapsedMs
+    });
+    htmlReport.writeDashboardFiles(payload, {
+      force: true,
+      refreshSec: options.refreshSec,
+      servePort: options.servePort || config.DASHBOARD_DEFAULT_PORT
+    });
+
+    const htmlUrl = dashboardFileUrl();
+    console.log(`\n  ${formatter.styleText('✔', 'brightGreen')} ${i18n.t('openDashboard', { url: htmlUrl })}`);
+    console.log(`  ${formatter.styleText('↳', 'gray')} ${config.DASHBOARD_HTML_FILE}\n`);
+
+    if (options.open) {
+      openInBrowser(htmlUrl);
+    }
+    return;
+  }
+
+  // 3b. SSE dashboard server mode (--serve)
+  if (options.serve) {
+    const activeModel = options.model || config.getActiveModelFromSettings();
+    const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
+    const port = Number.isInteger(options.servePort) ? options.servePort : config.DASHBOARD_DEFAULT_PORT;
+    const serverInfo = await serve.startDashboardServer({
+      port,
+      currency,
+      lang: targetLang || i18n.getLocale(),
+      isFree,
+      model: activeModel,
+      modelName: activeModel,
+      refreshSec: options.refreshSec
+    });
+
+    console.log(`\n  ${formatter.styleText('✔', 'brightGreen')} ${i18n.t('serveStarted', { url: serverInfo.url })}`);
+    if (serverInfo.port !== port) {
+      console.log(`  ${formatter.styleText('↳', 'gray')} ${i18n.t('servePortInUse', { port, nextPort: serverInfo.port })}`);
+    }
+    console.log('');
+
+    if (options.open) {
+      openInBrowser(serverInfo.url);
+    }
+    return;
+  }
+
+  // 3c. Hook / 1-line badge mode (single sync pass feeds badge + optional
+  //     dashboard write — C4: no second syncSessions call)
   if (options.hook) {
     const stdinContext = await hookHandler.readStdinJson();
     const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
+    const activeModel = options.model || config.getActiveModelFromSettings();
+
+    // ONE syncSessions pass shared by badge and dashboard writer (C4)
+    const syncResult = await cacheManager.syncSessions({
+      forceFresh: options.fresh,
+      modelName: activeModel
+    });
+
     const result = await hookHandler.handlePostInvocation({
       currency,
       modelName: options.model,
       isFree,
-      stdinContext
+      stdinContext,
+      sessions: syncResult.sessions
     });
+
+    if (options.writeDashboard) {
+      const payload = htmlReport.buildDashboardPayload(syncResult.sessions, {
+        currency,
+        lang: targetLang || i18n.getLocale(),
+        isFree,
+        model: activeModel,
+        modelName: activeModel,
+        parsedCount: syncResult.parsedCount,
+        cachedCount: syncResult.cachedCount,
+        elapsedMs: syncResult.elapsedMs
+      });
+      htmlReport.writeDashboardFiles(payload, {
+        refreshSec: options.refreshSec,
+        servePort: options.servePort || config.DASHBOARD_DEFAULT_PORT
+      });
+    }
 
     if (options.raw) {
       console.log(result.badge);

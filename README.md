@@ -185,6 +185,48 @@ agy-tokens --hook --raw
 # Output: ⚡ [Antigravity] Turn: 1.8k ($0.0003) | Today: 64.2k ($0.0096) | Cache: 74%
 ```
 
+### 8. Self-Refreshing HTML Dashboard (`--html`)
+```bash
+# Generate dashboard files (HTML + data) and print the file:// link
+agy-tokens --html
+
+# Generate and open in the default browser
+agy-tokens --html --open
+```
+Writes to `~/.gemini/antigravity-dashboard/`:
+- `dashboard.html` — single-file offline dashboard (inline CSS/JS, SVG chart, no CDN)
+- `dashboard-data.js` — JSONP-style payload (`window.__AGY_DASH__ = {...};`)
+- `dashboard-data.json` — same payload as JSON
+
+The page auto-refreshes every 5 seconds via `<script src="dashboard-data.js?v=ts">`
+injection polling (works from `file://` where `fetch()` is CORS-blocked), and
+auto-upgrades to SSE push when the optional server below is running.
+
+### 9. SSE Push Server (`--serve`)
+```bash
+# Start the local streaming server (default port 8787, auto-increments on conflict)
+agy-tokens --serve
+
+# Custom / random port
+agy-tokens --serve --port 9000
+agy-tokens --serve --port 0
+
+# Start and open the browser
+agy-tokens --serve --open
+```
+Routes: `GET /` (dashboard, `Cache-Control: no-store`), `GET /events` (SSE push
+every 5s), `GET /data.json`. Binds **127.0.0.1 only** — token usage data never
+leaves your machine. Stop with `Ctrl+C`.
+
+### 10. Statusline Dashboard Side Effect (`--write-dashboard`)
+```bash
+agy-tokens --hook --raw --write-dashboard
+```
+Prints the same single-line badge AND rewrites the dashboard data files in the
+same process (one `syncSessions()` pass shared by both — no double parsing).
+The dashboard HTML self-heals if missing. This is the flag that makes the
+statusline the real-time data writer for the browser dashboard.
+
 ---
 
 ## 🎛 Command Line Options Reference
@@ -208,6 +250,13 @@ agy-tokens --hook --raw
 | `--prices`, `--models` | | Display official API pricing catalog table for all `/model` choices |
 | `--sync`, `--sync-prices` | | Synchronize latest official API pricing catalog from remote repo |
 | `--auto-sync` | | Auto-sync pricing if older than 24 hours |
+| `--html`, `--dashboard` | | Generate self-refreshing HTML dashboard (summary cards + 30-day table + SVG chart) |
+| `--serve [port]` | | Start local SSE dashboard server (default 8787, auto-increments on conflict) |
+| `--port <n>` | | Port for `--serve` (`0` = random) |
+| `--open` | | Open dashboard in default browser after `--html` / `--serve` |
+| `--write-dashboard` | | Write dashboard data files as a statusline side effect (single sync pass) |
+| `--no-link` | | Suppress the clickable dashboard link in the statusline badge |
+| `--refresh <sec>` | | Dashboard polling interval in seconds (default 5) |
 | `--no-color` | | Disable ANSI terminal colors |
 | `--help` | `-h` | Display help screen |
 | `--version` | `-v` | Display version number |
@@ -264,12 +313,12 @@ To automatically display a real-time token and cost badge after every turn in An
 ```json
 "statusLine": {
   "type": "command",
-  "command": "agy-tokens --hook --raw",
+  "command": "agy-tokens --hook --raw --write-dashboard",
   "enabled": true,
   "stack_with_default": true
 }
 ```
-The statusline script receives the session JSON state on stdin and prints a one-line `⚡ [Antigravity]` badge; `agy-tokens --hook --raw` is already compatible (reads stdin with a 50ms timeout).
+The statusline script receives the session JSON state on stdin and prints a one-line `⚡ [Antigravity]` badge ending with a clickable `📊 Dashboard` segment (OSC 8 hyperlink; Ctrl+Click opens the dashboard in your browser — degrades to plain text on terminals without OSC 8, or use `--no-link` to suppress). `--write-dashboard` also rewrites the dashboard data files on every state change, so the browser dashboard stays live with zero background processes. Run `agy-tokens --html` once to generate the initial dashboard.
 
 ---
 

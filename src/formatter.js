@@ -613,9 +613,11 @@ function renderSessionTable(session, currencyCode, isFree = false) {
  * @param {object} badgeData - Turn & daily metrics.
  * @param {string} [currencyCode='usd'] - Currency code.
  * @param {boolean} [isFree=false] - Free subscription quota mode flag.
+ * @param {string|null} [link=null] - Optional OSC 8 link segment appended as
+ *   the last badge segment (e.g. clickable 📊 Dashboard). Null/empty omits it.
  * @returns {string}
  */
-function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false) {
+function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, link = null) {
   const turnTok = formatCompact(badgeData.turnTokens || 0);
   const turnCost = isFree || badgeData.isFree
     ? t('freeCostLabel')
@@ -626,12 +628,17 @@ function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false) {
     : formatCurrency(badgeData.todayCostUsd || 0, currencyCode);
   const cacheHit = `${(badgeData.cacheHitRate || 0).toFixed(0)}%`;
 
-  return (
+  let badge =
     `${styleText('⚡ [Antigravity]', 'brightCyan')} ` +
     `${t('hookBadgeTurn')}: ${styleText(turnTok, 'white')} (${styleText(turnCost, 'green')}) | ` +
     `${t('hookBadgeToday')}: ${styleText(todayTok, 'brightYellow')} (${styleText(todayCost, 'brightGreen')}) | ` +
-    `${t('hookBadgeCache')}: ${styleText(cacheHit, 'cyan')}`
-  );
+    `${t('hookBadgeCache')}: ${styleText(cacheHit, 'cyan')}`;
+
+  if (link) {
+    badge += ` | ${link}`;
+  }
+
+  return badge;
 }
 
 /**
@@ -661,6 +668,13 @@ function renderHelp() {
     ['--prices, --models', t('cliOptPrices')],
     ['--sync, --sync-prices', t('cliOptSync')],
     ['--auto-sync', t('cliOptAutoSync')],
+    ['--html, --dashboard', t('cliOptHtml')],
+    ['--serve [port]', t('cliOptServe')],
+    ['--port <n>', t('cliOptPort')],
+    ['--open', t('cliOptOpen')],
+    ['--write-dashboard', t('cliOptWriteDashboard')],
+    ['--no-link', t('cliOptNoLink')],
+    ['--refresh <sec>', t('cliOptRefresh')],
     ['--no-color', t('cliOptNoColor')],
     ['--help, -h', t('cliOptHelp')],
     ['--version, -v', t('cliOptVersion')]

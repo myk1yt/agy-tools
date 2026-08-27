@@ -81,6 +81,19 @@ agy-tokens --30d --lang zh
 agy-tokens --today --json
 ```
 
+### 7. Browser Dashboard (Real-Time HTML)
+```bash
+# Generate the self-refreshing dashboard and print its file:// link
+agy-tokens --html
+
+# Generate and open it in the default browser
+agy-tokens --html --open
+
+# Optional: true SSE push streaming server (127.0.0.1 only)
+agy-tokens --serve
+```
+Use when the user wants a visual dashboard in the browser: summary cards (Today / Yesterday / 7-day / 30-day), a 30-day daily breakdown table, and an SVG trend chart. The page auto-refreshes every 5 seconds; the statusline badge's `📊 Dashboard` segment (Ctrl+Click) opens the same file.
+
 ## Metrics Guide
 - **Input Tokens**: Fresh prompt tokens sent to the model (user prompt + tool outputs + un-cached context).
 - **Cached Tokens**: Prompt tokens served from Antigravity / Gemini / Claude prompt cache (billed at 75%-90% discount).

@@ -26,6 +26,17 @@ const REMOTE_PRICING_CACHE_FILE = path.join(GEMINI_DIR, 'antigravity_pricing.jso
 const BUNDLED_PRICING_FILE = path.join(__dirname, '..', 'data', 'pricing.json');
 
 /**
+ * Dashboard (real-time HTML) artifact paths and server defaults.
+ * All dashboard artifacts live under ~/.gemini/antigravity-dashboard/.
+ */
+const DASHBOARD_DIR = path.join(GEMINI_DIR, 'antigravity-dashboard');
+const DASHBOARD_HTML_FILE = path.join(DASHBOARD_DIR, 'dashboard.html');
+const DASHBOARD_DATA_JS = path.join(DASHBOARD_DIR, 'dashboard-data.js');
+const DASHBOARD_DATA_JSON = path.join(DASHBOARD_DIR, 'dashboard-data.json');
+const DASHBOARD_DEFAULT_PORT = 8787;
+const DASHBOARD_WRITE_THROTTLE_MS = 2000;
+
+/**
  * Regex patterns for smart fuzzy heuristic pricing tier detection.
  * Uses token-boundary matching to prevent false substring matches (e.g., 'mini' in 'gemini').
  */
@@ -652,6 +663,12 @@ module.exports = {
   ALT_PRICING_FILE,
   REMOTE_PRICING_CACHE_FILE,
   BUNDLED_PRICING_FILE,
+  DASHBOARD_DIR,
+  DASHBOARD_HTML_FILE,
+  DASHBOARD_DATA_JS,
+  DASHBOARD_DATA_JSON,
+  DASHBOARD_DEFAULT_PORT,
+  DASHBOARD_WRITE_THROTTLE_MS,
   MODEL_PRICING,
   CURRENCIES,
   FLASH_PATTERN,
