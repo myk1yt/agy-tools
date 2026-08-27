@@ -1413,6 +1413,186 @@ async function runAllTests() {
     });
   });
 
+  // --- Suite 18: Dashboard Link Target & Local Server Discovery (VS Code fix) ---
+  await describe('18. Dashboard Link Target & Local Server Discovery', async () => {
+    const dashboardLink = require('../src/dashboard-link');
+    const net = require('net');
+
+    /** Saves and restores TERM_PROGRAM / AGY_TOKENS_LINK_MODE around a test. */
+    async function withEnv(env, fn) {
+      const savedTermProgram = process.env.TERM_PROGRAM;
+      const savedLinkMode = process.env.AGY_TOKENS_LINK_MODE;
+      if ('TERM_PROGRAM' in env) process.env.TERM_PROGRAM = env.TERM_PROGRAM;
+      else delete process.env.TERM_PROGRAM;
+      if ('AGY_TOKENS_LINK_MODE' in env) process.env.AGY_TOKENS_LINK_MODE = env.AGY_TOKENS_LINK_MODE;
+      else delete process.env.AGY_TOKENS_LINK_MODE;
+      try {
+        await fn();
+      } finally {
+        if (savedTermProgram === undefined) delete process.env.TERM_PROGRAM;
+        else process.env.TERM_PROGRAM = savedTermProgram;
+        if (savedLinkMode === undefined) delete process.env.AGY_TOKENS_LINK_MODE;
+        else process.env.AGY_TOKENS_LINK_MODE = savedLinkMode;
+      }
+    }
+
+    await test('isVsCodeTerminal should detect TERM_PROGRAM=vscode', async () => {
+      await withEnv({ TERM_PROGRAM: 'vscode' }, () => {
+        assert.strictEqual(dashboardLink.isVsCodeTerminal(), true);
+      });
+      await withEnv({ TERM_PROGRAM: undefined }, () => {
+        assert.strictEqual(dashboardLink.isVsCodeTerminal(), false);
+      });
+      await withEnv({ TERM_PROGRAM: 'apple_Terminal' }, () => {
+        assert.strictEqual(dashboardLink.isVsCodeTerminal(), false);
+      });
+    });
+
+    await test('resolveLinkTarget should return http mode under TERM_PROGRAM=vscode', async () => {
+      await withEnv({ TERM_PROGRAM: 'vscode' }, () => {
+        const target = dashboardLink.resolveLinkTarget();
+        assert.strictEqual(target.mode, 'http');
+        assert(target.url.startsWith('http://127.0.0.1:'));
+        assert(target.url.endsWith('/'));
+      });
+    });
+
+    await test('resolveLinkTarget should return file mode outside VS Code', async () => {
+      await withEnv({ TERM_PROGRAM: undefined }, () => {
+        const target = dashboardLink.resolveLinkTarget();
+        assert.strictEqual(target.mode, 'file');
+        assert(target.url.startsWith('file://'));
+        assert(target.url.includes('dashboard.html'));
+      });
+    });
+
+    await test('AGY_TOKENS_LINK_MODE should force file/http regardless of terminal', async () => {
+      await withEnv({ TERM_PROGRAM: 'vscode', AGY_TOKENS_LINK_MODE: 'file' }, () => {
+        assert.strictEqual(dashboardLink.resolveLinkTarget().mode, 'file');
+      });
+      await withEnv({ TERM_PROGRAM: undefined, AGY_TOKENS_LINK_MODE: 'http' }, () => {
+        const target = dashboardLink.resolveLinkTarget();
+        assert.strictEqual(target.mode, 'http');
+        assert(target.url.startsWith('http://127.0.0.1:'));
+      });
+      await withEnv({ TERM_PROGRAM: undefined, AGY_TOKENS_LINK_MODE: 'bogus' }, () => {
+        assert.strictEqual(dashboardLink.resolveLinkTarget().mode, 'file');
+      });
+    });
+
+    await test('probePort should succeed against a live ephemeral server and fail fast on a closed port', async () => {
+      const server = net.createServer(() => {});
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const livePort = server.address().port;
+      assert.strictEqual(await dashboardLink.probePort(livePort), true);
+      await new Promise((resolve) => server.close(resolve));
+
+      // Closed port: expect a fast false (well under the 300ms cap on loopback)
+      const t0 = Date.now();
+      assert.strictEqual(await dashboardLink.probePort(livePort), false);
+      assert(Date.now() - t0 < 3000, 'closed-port probe should fail fast');
+    });
+
+    await test('port file should be written atomically, read back, and tolerate stale pid', async () => {
+      const portFile = path.join(os.tmpdir(), `agy-test-portfile-${process.pid}.json`);
+      try {
+        const written = dashboardLink.writePortFile(8971, 999999, portFile);
+        assert.strictEqual(written.port, 8971);
+        assert.strictEqual(written.pid, 999999);
+        assert(typeof written.startedAt === 'string');
+
+        const readBack = dashboardLink.readPortFile(portFile);
+        assert.strictEqual(readBack.port, 8971);
+        assert.strictEqual(readBack.pid, 999999); // stale pid tolerated (probe decides liveness)
+        assert(!fs.existsSync(`${portFile}.tmp`), 'no tmp file left after atomic rename');
+
+        dashboardLink.removePortFile(portFile);
+        assert.strictEqual(dashboardLink.readPortFile(portFile), null);
+      } finally {
+        dashboardLink.removePortFile(portFile);
+      }
+    });
+
+    await test('readPortFile should reject corrupt JSON and invalid records', async () => {
+      const portFile = path.join(os.tmpdir(), `agy-test-portfile-corrupt-${process.pid}.json`);
+      try {
+        fs.writeFileSync(portFile, '{ not json', 'utf8');
+        assert.strictEqual(dashboardLink.readPortFile(portFile), null);
+
+        fs.writeFileSync(portFile, JSON.stringify({ hello: 'world' }), 'utf8');
+        assert.strictEqual(dashboardLink.readPortFile(portFile), null);
+
+        fs.writeFileSync(portFile, JSON.stringify({ intent: 'spawn', requestedPort: 8787, at: Date.now() }), 'utf8');
+        const intent = dashboardLink.readPortFile(portFile);
+        assert.strictEqual(intent.intent, 'spawn');
+      } finally {
+        dashboardLink.removePortFile(portFile);
+      }
+    });
+
+    await test('ensureServerRunning should link to a running server via port file probe', async () => {
+      const portFile = path.join(os.tmpdir(), `agy-test-ensure-${process.pid}.json`);
+      const httpServer = net.createServer(() => {});
+      await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+      const livePort = httpServer.address().port;
+      dashboardLink.writePortFile(livePort, process.pid, portFile);
+      try {
+        const result = await dashboardLink.ensureServerRunning({ portFile, entryJs: path.join(os.tmpdir(), 'definitely-missing-entry.js') });
+        assert(result, 'should return a result when the recorded port is live');
+        assert.strictEqual(result.url, `http://127.0.0.1:${livePort}/`);
+        assert.strictEqual(result.started, false);
+      } finally {
+        dashboardLink.removePortFile(portFile);
+        await new Promise((resolve) => httpServer.close(resolve));
+      }
+    });
+
+    await test('ensureServerRunning should honor a fresh spawn intent without spawning', async () => {
+      const portFile = path.join(os.tmpdir(), `agy-test-intent-${process.pid}.json`);
+      try {
+        dashboardLink.writeSpawnIntent(8793, portFile);
+        const result = await dashboardLink.ensureServerRunning({
+          portFile,
+          entryJs: path.join(os.tmpdir(), 'definitely-missing-entry.js'),
+          port: 8793
+        });
+        assert(result, 'fresh intent should yield a link target');
+        assert.strictEqual(result.url, 'http://127.0.0.1:8793/');
+        assert.strictEqual(result.started, false);
+      } finally {
+        dashboardLink.removePortFile(portFile);
+      }
+    });
+
+    await test('ensureServerRunning should return null when entry is missing and ports are dead', async () => {
+      const portFile = path.join(os.tmpdir(), `agy-test-null-${process.pid}.json`);
+      try {
+        // No port file, dead default port, missing entry → fallback signal
+        const result = await dashboardLink.ensureServerRunning({
+          portFile,
+          entryJs: path.join(os.tmpdir(), 'definitely-missing-entry.js'),
+          port: 1 // port 1 on loopback is closed in test environments
+        });
+        assert.strictEqual(result, null);
+      } finally {
+        dashboardLink.removePortFile(portFile);
+      }
+    });
+
+    await test('removePortFileIfPort should only remove the file when the port matches', async () => {
+      const portFile = path.join(os.tmpdir(), `agy-test-rmif-${process.pid}.json`);
+      try {
+        dashboardLink.writePortFile(8975, process.pid, portFile);
+        dashboardLink.removePortFileIfPort(9999, portFile); // different port → keep
+        assert(dashboardLink.readPortFile(portFile) !== null);
+        dashboardLink.removePortFileIfPort(8975, portFile); // matching port → remove
+        assert.strictEqual(dashboardLink.readPortFile(portFile), null);
+      } finally {
+        dashboardLink.removePortFile(portFile);
+      }
+    });
+  });
+
   // --- Summary & Exit Code ---
   const duration = Date.now() - startTime;
   console.log('\n\x1b[1m=======================================================');

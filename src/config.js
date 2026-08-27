@@ -33,6 +33,7 @@ const DASHBOARD_DIR = path.join(GEMINI_DIR, 'antigravity-dashboard');
 const DASHBOARD_HTML_FILE = path.join(DASHBOARD_DIR, 'dashboard.html');
 const DASHBOARD_DATA_JS = path.join(DASHBOARD_DIR, 'dashboard-data.js');
 const DASHBOARD_DATA_JSON = path.join(DASHBOARD_DIR, 'dashboard-data.json');
+const DASHBOARD_SERVER_PORT_FILE = path.join(DASHBOARD_DIR, 'dashboard-server.json');
 const DASHBOARD_DEFAULT_PORT = 8787;
 const DASHBOARD_WRITE_THROTTLE_MS = 2000;
 
@@ -667,6 +668,7 @@ module.exports = {
   DASHBOARD_HTML_FILE,
   DASHBOARD_DATA_JS,
   DASHBOARD_DATA_JSON,
+  DASHBOARD_SERVER_PORT_FILE,
   DASHBOARD_DEFAULT_PORT,
   DASHBOARD_WRITE_THROTTLE_MS,
   MODEL_PRICING,

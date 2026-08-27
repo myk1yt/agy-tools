@@ -18,6 +18,7 @@ const priceSyncer = require('./price-syncer');
 const htmlReport = require('./html-report');
 const serve = require('./serve');
 const osc8 = require('./osc8');
+const dashboardLinkModule = require('./dashboard-link');
 
 const pkg = require('../package.json');
 
@@ -325,6 +326,20 @@ async function runCli(argv = process.argv) {
       refreshSec: options.refreshSec
     });
 
+    // Publish the authoritative bound port so hook renders can discover the
+    // running server and link to it (atomic tmp+rename; DASHBOARD-LINK/serve/001).
+    dashboardLinkModule.writePortFile(serverInfo.port);
+
+    // Graceful shutdown: clear the port file ONLY while it still points at
+    // this server's port, so the badge never links to a dead port and a
+    // newer server's record is preserved.
+    const shutdownAndExit = () => {
+      dashboardLinkModule.removePortFileIfPort(serverInfo.port);
+      serve.stopDashboardServer(serverInfo.server).then(() => process.exit(0));
+    };
+    process.once('SIGINT', shutdownAndExit);
+    process.once('SIGTERM', shutdownAndExit);
+
     console.log(`\n  ${formatter.styleText('✔', 'brightGreen')} ${i18n.t('serveStarted', { url: serverInfo.url })}`);
     if (serverInfo.port !== port) {
       console.log(`  ${formatter.styleText('↳', 'gray')} ${i18n.t('servePortInUse', { port, nextPort: serverInfo.port })}`);
@@ -346,10 +361,21 @@ async function runCli(argv = process.argv) {
 
     // W1: OSC 8 hyperlink for the 📊 Dashboard badge segment. --no-link omits
     // the segment entirely; NO_COLOR/TERM=dumb degrade to plain text inside
-    // formatOsc8Link (isOsc8Supported).
-    const dashboardLink = options.noLink
-      ? null
-      : osc8.formatOsc8Link(osc8.dashboardFileUrl(), `📊 ${i18n.t('dashboardLink')}`);
+    // formatOsc8Link (isOsc8Supported). Inside VS Code terminals file:// OSC 8
+    // links open in the EDITOR by design (vscode#39278/176812), so the badge
+    // links to the local http dashboard server instead (auto-started in the
+    // background, 127.0.0.1 only); AGY_TOKENS_LINK_MODE=file|http forces a
+    // mode. Any http failure falls back to the file:// link.
+    let dashboardLink = null;
+    if (!options.noLink) {
+      const linkTarget = dashboardLinkModule.resolveLinkTarget();
+      let linkUrl = linkTarget.url;
+      if (linkTarget.mode === 'http') {
+        const ensured = await dashboardLinkModule.ensureServerRunning();
+        linkUrl = ensured ? ensured.url : osc8.dashboardFileUrl();
+      }
+      dashboardLink = osc8.formatOsc8Link(linkUrl, `📊 ${i18n.t('dashboardLink')}`);
+    }
 
     // ONE syncSessions pass shared by badge and dashboard writer (C4)
     const syncResult = await cacheManager.syncSessions({

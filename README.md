@@ -18,7 +18,7 @@
 - 📊 **Rich ANSI Terminal Dashboard & Summary Cards**: Visual status cards, formatted daily breakdown tables with cache hit percentages, and turn-by-turn session inspection.
 - 🌐 **Full Multi-Language (i18n) Support**: Native auto-locale detection with manual `--lang` override supporting English (`en`), Korean (`ko`), Japanese (`ja`), and Chinese (`zh`).
 - 💱 **Multi-Currency Converter**: Real-time conversion to `USD ($)`, `KRW (₩)`, `JPY (¥)`, `EUR (€)`, and `GBP (£)`.
-- 🔗 **Statusline-Only Integration**: One `statusLine` entry in `~/.gemini/antigravity-cli/settings.json` — nothing inside agy is modified and no background processes run. The badge refreshes the browser dashboard data on every state change via `--write-dashboard`.
+- 🔗 **Statusline-Only Integration**: One `statusLine` entry in `~/.gemini/antigravity-cli/settings.json` — nothing inside agy is modified. The badge refreshes the browser dashboard data on every state change via `--write-dashboard` (inside VS Code terminals, a tiny local dashboard server is auto-started on demand — see [Dashboard Link](#-dashboard-link-osc-8) below).
 - 🔒 **100% Privacy Preserving**: Zero network telemetry. All parsing and aggregation executes strictly on your local machine.
 
 ---
@@ -295,6 +295,7 @@ Add (or merge) this entry into `~/.gemini/antigravity-cli/settings.json` manuall
 
 - The command uses **8.3 short paths with no inner quotes** so it survives cmd.exe parsing and npm global-path changes (`NODE_M~1` = `node_modules`, `AGY-TO~1` = the `agy-tools` package). Adjust the short paths if your Node/npm install locations differ (`dir /x` shows them).
 - The statusline script receives the session JSON state on stdin and prints a one-line `⚡ [Antigravity]` badge ending with a clickable `📊 Dashboard` segment (OSC 8 hyperlink; Ctrl+Click opens the dashboard in your browser — degrades to plain text on terminals without OSC 8, or use `--no-link` to suppress).
+- **VS Code terminals**: VS Code routes `file://` OSC 8 links to the editor by design, so inside VS Code (`TERM_PROGRAM=vscode`) the badge links to the local **http** dashboard (`http://127.0.0.1:8787/`) instead. The server is auto-started in the background on first render (`node agy-tokens --serve`, binds **127.0.0.1 only**, re-aggregates every 5s) and discovered via `~/.gemini/antigravity-dashboard/dashboard-server.json`; outside VS Code the badge keeps the `file://` dashboard link. Set `AGY_TOKENS_LINK_MODE=file|http` to force a mode, or `--no-link` to suppress the segment entirely.
 - `--write-dashboard` rewrites the dashboard data files on **every state change** — more often than any lifecycle event — so the browser dashboard stays live with zero background processes. Run `agy-tokens --html` once to generate the initial dashboard.
 - Restart agy after saving `settings.json` to see the badge.
 
