@@ -26,9 +26,9 @@ const {
   calculateCacheSavingsUsd
 } = require('./config');
 const { formatLocalDate, summarizeTurns } = require('./aggregator');
-const { t, getLocale, getAllTranslations } = require('./i18n');
+const { t, getLocale, getAllTranslations, isRtl } = require('./i18n');
 
-const DASHBOARD_PAYLOAD_VERSION = 2;
+const DASHBOARD_PAYLOAD_VERSION = 3;
 const DASHBOARD_DEFAULT_REFRESH_SEC = 5;
 
 /**
@@ -109,9 +109,13 @@ function buildDashboardPayload(sessions, opts = {}) {
   // One pass: bucket turns per date + track session membership
   const turnsByDate = new Map();
   const sessionIdsByDate = new Map();
+  const dailyModelsMap = new Map();
+  const dailyModelSessions = new Map();
   for (const key of dateKeys) {
     turnsByDate.set(key, []);
     sessionIdsByDate.set(key, new Set());
+    dailyModelsMap.set(key, {});
+    dailyModelSessions.set(key, {});
   }
 
   // Per-model accumulators (W4/REQ-107): each session is costed with its OWN
@@ -146,6 +150,38 @@ function buildDashboardPayload(sessions, opts = {}) {
       if (turnsByDate.has(key)) {
         turnsByDate.get(key).push(turn);
         sessionIdsByDate.get(key).add(session.sessionId);
+
+        const dateModelMap = dailyModelsMap.get(key);
+        if (dateModelMap) {
+          if (!dateModelMap[sessionModel]) {
+            dateModelMap[sessionModel] = {
+              model: sessionModel,
+              displayName: sessionModel,
+              totalTokens: 0,
+              inputTokens: 0,
+              cachedTokens: 0,
+              outputTokens: 0,
+              cacheHitRate: 0,
+              costUsd: 0,
+              cacheSavingsUsd: 0,
+              sessions: 0,
+              turns: 0
+            };
+          }
+          const dm = dateModelMap[sessionModel];
+          dm.inputTokens += turn.inputTokens || 0;
+          dm.cachedTokens += turn.cachedTokens || 0;
+          dm.outputTokens += turn.outputTokens || 0;
+          dm.turns += 1;
+
+          const dateSessionMap = dailyModelSessions.get(key);
+          if (dateSessionMap) {
+            if (!dateSessionMap[sessionModel]) {
+              dateSessionMap[sessionModel] = new Set();
+            }
+            dateSessionMap[sessionModel].add(session.sessionId !== undefined ? session.sessionId : session);
+          }
+        }
       }
       modelRow.inputTokens += turn.inputTokens || 0;
       modelRow.cachedTokens += turn.cachedTokens || 0;
@@ -174,6 +210,25 @@ function buildDashboardPayload(sessions, opts = {}) {
       return row;
     })
     .sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens);
+
+  // Finalize dailyModels: per-date per-model map
+  const dailyModels = {};
+  for (const key of dateKeys) {
+    const dateModelMap = dailyModelsMap.get(key) || {};
+    const sessionMap = dailyModelSessions.get(key) || {};
+    dailyModels[key] = {};
+    for (const model of Object.keys(dateModelMap)) {
+      const row = dateModelMap[model];
+      row.totalTokens = row.inputTokens + row.cachedTokens + row.outputTokens;
+      row.cacheHitRate = row.inputTokens + row.cachedTokens > 0
+        ? (row.cachedTokens / (row.inputTokens + row.cachedTokens)) * 100
+        : 0;
+      row.sessions = (sessionMap[model] || new Set()).size;
+      row.costUsd = round6(calculateCostUsd(row.inputTokens, row.cachedTokens, row.outputTokens, model));
+      row.cacheSavingsUsd = round6(calculateCacheSavingsUsd(row.cachedTokens, model));
+      dailyModels[key][model] = row;
+    }
+  }
 
   // Per-day summaries (DailyRow schema)
   const daily = dateKeys.map(key => {
@@ -216,10 +271,12 @@ function buildDashboardPayload(sessions, opts = {}) {
     generatedAt: new Date().toISOString(),
     currency: opts.currency || 'usd',
     lang,
+    isRtl: isRtl(lang),
     i18n,
     isFree: Boolean(opts.isFree),
     model: opts.model || '',
     models,
+    dailyModels,
     summaries: {
       today: todaySummary,
       yesterday: yesterdaySummary,
@@ -318,6 +375,7 @@ function renderDashboardHtml(payload, opts = {}) {
   const servePort = Number(opts.servePort) > 0 ? Number(opts.servePort) : DASHBOARD_DEFAULT_PORT;
   const sseUrl = `http://127.0.0.1:${servePort}/events`;
   const lang = String(payload.lang || getLocale() || 'en');
+  const rtlAttr = payload.isRtl || isRtl(lang) ? ' dir="rtl"' : '';
   const initialI18n = payload.i18n || dashboardI18n(lang);
   const i18nJson = jsonForScript(initialI18n);
   const fmtJson = jsonForScript(dashboardCurrencyFmt(payload.currency, payload.isFree));
@@ -331,12 +389,18 @@ function renderDashboardHtml(payload, opts = {}) {
     `  var REFRESH_MS = ${Math.round(refreshSec * 1000)};`,
     `  var SSE_URL = '${sseUrl}';`,
     `  var currentLang = '${lang}';`,
+    "  var filterState = { range: '30d', from: null, to: null, models: new Set() };",
+    "  var allModels = [];",
+    "  var lastPayload = null;",
     "",
     "  function updateI18N(p) {",
     "    if (!p || !p.i18n) return;",
     "    if (p.lang && p.lang !== currentLang) {",
     "      currentLang = p.lang;",
     "      document.documentElement.lang = p.lang;",
+    "    }",
+    "    if (p.isRtl !== undefined) {",
+    "      document.documentElement.dir = p.isRtl ? 'rtl' : 'ltr';",
     "    }",
     "    for (var k in p.i18n) {",
     "      if (Object.prototype.hasOwnProperty.call(p.i18n, k)) {",
@@ -357,6 +421,17 @@ function renderDashboardHtml(payload, opts = {}) {
     "    if (el && I18N.tableTitle) el.textContent = I18N.tableTitle;",
     "    el = document.getElementById('empty');",
     "    if (el && I18N.noDataFound) el.textContent = I18N.noDataFound;",
+    "    el = document.getElementById('filterDateLabel');",
+    "    if (el && I18N.filterDate) el.textContent = I18N.filterDate;",
+    "    el = document.getElementById('filterModelLabel');",
+    "    if (el && I18N.filterModel) el.textContent = I18N.filterModel;",
+    "",
+    "    var filterBtns = document.querySelectorAll('.filter-btn[data-range]');",
+    "    var rangeKeys = { '30d': 'filter30d', '7d': 'filter7d', 'today': 'filterToday', 'yesterday': 'filterYesterday', 'custom': 'filterCustom' };",
+    "    for (var bi = 0; bi < filterBtns.length; bi++) {",
+    "      var r = filterBtns[bi].getAttribute('data-range');",
+    "      if (rangeKeys[r] && I18N[rangeKeys[r]]) filterBtns[bi].textContent = I18N[rangeKeys[r]];",
+    "    }",
     "  }",
     "",
     "  function esc(s) {",
@@ -459,6 +534,201 @@ function renderDashboardHtml(payload, opts = {}) {
     "    wrap.innerHTML = html + '</table>';",
     "  }",
     "",
+    "  function initFilters(p) {",
+    "    if (!p) return;",
+    "    lastPayload = p;",
+    "    var models = p.models || [];",
+    "    var modelNames = models.map(function(m) { return m.model; }).sort();",
+    "    if (JSON.stringify(modelNames) !== JSON.stringify(allModels)) {",
+    "      allModels = modelNames;",
+    "      filterState.models = new Set(modelNames);",
+    "      var wrap = document.getElementById('modelFilters');",
+    "      if (wrap) {",
+    "        var html = '<span class=\"filter-group-label\" id=\"filterModelLabel\">' + esc(I18N.filterModel || 'Model') + '</span>';",
+    "        html += '<label class=\"filter-check\"><input type=\"checkbox\" checked data-model=\"*\">' + esc(I18N.filterAll || 'All') + '</label>';",
+    "        for (var i = 0; i < modelNames.length; i++) {",
+    "          html += '<label class=\"filter-check\"><input type=\"checkbox\" checked data-model=\"' + esc(modelNames[i]) + '\">' + esc(modelNames[i]) + '</label>';",
+    "        }",
+    "        wrap.innerHTML = html;",
+    "        bindModelCheckboxEvents();",
+    "      }",
+    "    }",
+    "    if (p.daily && p.daily.length > 0) {",
+    "      var fromEl = document.getElementById('filterFrom');",
+    "      var toEl = document.getElementById('filterTo');",
+    "      if (fromEl) { fromEl.min = p.daily[0].date; fromEl.max = p.daily[p.daily.length - 1].date; }",
+    "      if (toEl) { toEl.min = p.daily[0].date; toEl.max = p.daily[p.daily.length - 1].date; }",
+    "    }",
+    "  }",
+    "",
+    "  function getFilteredData(p) {",
+    "    if (!p) return null;",
+    "    var daily = p.daily || [];",
+    "    var dailyModels = p.dailyModels || {};",
+    "    var range = filterState.range;",
+    "    var startIdx = 0;",
+    "    var endIdx = daily.length;",
+    "    if (range === 'today') {",
+    "      startIdx = Math.max(0, daily.length - 1);",
+    "    } else if (range === 'yesterday') {",
+    "      startIdx = Math.max(0, daily.length - 2);",
+    "      endIdx = Math.max(0, daily.length - 1);",
+    "    } else if (range === '7d') {",
+    "      startIdx = Math.max(0, daily.length - 7);",
+    "    } else if (range === '30d') {",
+    "      startIdx = 0;",
+    "    } else if (range === 'custom' && filterState.from && filterState.to) {",
+    "      for (var i = 0; i < daily.length; i++) {",
+    "        if (daily[i].date >= filterState.from) { startIdx = i; break; }",
+    "      }",
+    "      for (var j = daily.length - 1; j >= 0; j--) {",
+    "        if (daily[j].date <= filterState.to) { endIdx = j + 1; break; }",
+    "      }",
+    "    }",
+    "    var slicedDaily = daily.slice(startIdx, endIdx);",
+    "    var slicedDates = slicedDaily.map(function(d) { return d.date; });",
+    "    var selectedModels = filterState.models;",
+    "    var modelAgg = {};",
+    "    for (var di = 0; di < slicedDates.length; di++) {",
+    "      var dateKey = slicedDates[di];",
+    "      var dateModels = dailyModels[dateKey];",
+    "      if (!dateModels) continue;",
+    "      for (var modelName in dateModels) {",
+    "        if (!selectedModels.has(modelName)) continue;",
+    "        if (!modelAgg[modelName]) {",
+    "          modelAgg[modelName] = { model: modelName, displayName: dateModels[modelName].displayName || modelName, totalTokens: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, cacheHitRate: 0, costUsd: 0, cacheSavingsUsd: 0, sessions: 0, turns: 0 };",
+    "        }",
+    "        var a = modelAgg[modelName];",
+    "        var b = dateModels[modelName];",
+    "        a.inputTokens += b.inputTokens || 0;",
+    "        a.cachedTokens += b.cachedTokens || 0;",
+    "        a.outputTokens += b.outputTokens || 0;",
+    "        a.turns += b.turns || 0;",
+    "        a.sessions += b.sessions || 0;",
+    "        a.costUsd += b.costUsd || 0;",
+    "        a.cacheSavingsUsd += b.cacheSavingsUsd || 0;",
+    "      }",
+    "    }",
+    "    var filteredModels = [];",
+    "    for (var mn in modelAgg) {",
+    "      var r = modelAgg[mn];",
+    "      r.totalTokens = r.inputTokens + r.cachedTokens + r.outputTokens;",
+    "      r.cacheHitRate = (r.inputTokens + r.cachedTokens) > 0 ? (r.cachedTokens / (r.inputTokens + r.cachedTokens)) * 100 : 0;",
+    "      r.costUsd = Math.round(r.costUsd * 1e6) / 1e6;",
+    "      r.cacheSavingsUsd = Math.round(r.cacheSavingsUsd * 1e6) / 1e6;",
+    "      filteredModels.push(r);",
+    "    }",
+    "    filteredModels.sort(function(a, b) { return b.costUsd - a.costUsd || b.totalTokens - a.totalTokens; });",
+    "    var filteredDaily = [];",
+    "    for (var di2 = 0; di2 < slicedDaily.length; di2++) {",
+    "      var dd = slicedDaily[di2];",
+    "      var dateKey2 = dd.date;",
+    "      var dm = dailyModels[dateKey2];",
+    "      var totalIn = 0, totalCach = 0, totalOut = 0, totalTurns = 0, totalSess = 0, totalCost = 0, totalSav = 0;",
+    "      if (dm) {",
+    "        for (var mname in dm) {",
+    "          if (!selectedModels.has(mname)) continue;",
+    "          var mr = dm[mname];",
+    "          totalIn += mr.inputTokens || 0;",
+    "          totalCach += mr.cachedTokens || 0;",
+    "          totalOut += mr.outputTokens || 0;",
+    "          totalTurns += mr.turns || 0;",
+    "          totalSess += mr.sessions || 0;",
+    "          totalCost += mr.costUsd || 0;",
+    "          totalSav += mr.cacheSavingsUsd || 0;",
+    "        }",
+    "      }",
+    "      var tt = totalIn + totalCach + totalOut;",
+    "      var chr = (totalIn + totalCach) > 0 ? (totalCach / (totalIn + totalCach)) * 100 : 0;",
+    "      filteredDaily.push({",
+    "        date: dd.date, sessions: totalSess, turns: totalTurns,",
+    "        inputTokens: totalIn, cachedTokens: totalCach, outputTokens: totalOut,",
+    "        totalTokens: tt, cacheHitRate: Math.round(chr * 1e6) / 1e6,",
+    "        costUsd: Math.round(totalCost * 1e6) / 1e6, cacheSavingsUsd: Math.round(totalSav * 1e6) / 1e6",
+    "      });",
+    "    }",
+    "    var sumTokens = 0, sumCost = 0, sumSess = 0, sumTurns = 0, sumIn = 0, sumCach = 0, sumOut = 0, sumSav = 0;",
+    "    for (var fi = 0; fi < filteredDaily.length; fi++) {",
+    "      var fd = filteredDaily[fi];",
+    "      sumTokens += fd.totalTokens; sumCost += fd.costUsd; sumSess += fd.sessions;",
+    "      sumTurns += fd.turns; sumIn += fd.inputTokens; sumCach += fd.cachedTokens;",
+    "      sumOut += fd.outputTokens; sumSav += fd.cacheSavingsUsd;",
+    "    }",
+    "    var sumChr = (sumIn + sumCach) > 0 ? (sumCach / (sumIn + sumCach)) * 100 : 0;",
+    "    var filteredSummary = {",
+    "      totalTokens: sumTokens, costUsd: Math.round(sumCost * 1e6) / 1e6,",
+    "      totalSessions: sumSess, totalTurns: sumTurns, cacheHitRate: Math.round(sumChr * 1e6) / 1e6,",
+    "      cacheSavingsUsd: Math.round(sumSav * 1e6) / 1e6",
+    "    };",
+    "    return { daily: filteredDaily, models: filteredModels, summary: filteredSummary };",
+    "  }",
+    "",
+    "  function applyFilters() {",
+    "    if (!lastPayload) return;",
+    "    var filtered = getFilteredData(lastPayload);",
+    "    if (!filtered) return;",
+    "    document.getElementById('chart').innerHTML = renderSvg(filtered.daily);",
+    "    document.getElementById('tableWrap').innerHTML = renderTable(filtered.daily);",
+    "    renderModels(filtered.models);",
+    "    var s = filtered.summary;",
+    "    var rangeLabels = { '30d': (I18N.filter30d || I18N.summary30d), '7d': (I18N.filter7d || I18N.summary7d), 'today': (I18N.filterToday || I18N.summaryToday), 'yesterday': (I18N.filterYesterday || I18N.summaryYesterday), 'custom': (I18N.filterCustom || 'Custom') };",
+    "    var label = rangeLabels[filterState.range] || I18N.filter30d || I18N.summary30d;",
+    "    var cards = cardHtml(label, s);",
+    "    document.getElementById('cards').innerHTML = cards;",
+    "  }",
+    "",
+    "  function bindDateFilterEvents() {",
+    "    var btns = document.querySelectorAll('.filter-btn[data-range]');",
+    "    for (var i = 0; i < btns.length; i++) {",
+    "      btns[i].addEventListener('click', function() {",
+    "        var range = this.getAttribute('data-range');",
+    "        filterState.range = range;",
+    "        var allBtns = document.querySelectorAll('.filter-btn[data-range]');",
+    "        for (var j = 0; j < allBtns.length; j++) allBtns[j].classList.remove('active');",
+    "        this.classList.add('active');",
+    "        var customEl = document.getElementById('customDateRange');",
+    "        if (customEl) customEl.style.display = range === 'custom' ? 'inline' : 'none';",
+    "        if (range !== 'custom') applyFilters();",
+    "      });",
+    "    }",
+    "    var fromEl = document.getElementById('filterFrom');",
+    "    var toEl = document.getElementById('filterTo');",
+    "    if (fromEl) fromEl.addEventListener('change', function() { filterState.from = this.value; if (filterState.range === 'custom') applyFilters(); });",
+    "    if (toEl) toEl.addEventListener('change', function() { filterState.to = this.value; if (filterState.range === 'custom') applyFilters(); });",
+    "  }",
+    "",
+    "  var modelEventsBound = false;",
+    "  function bindModelCheckboxEvents() {",
+    "    var wrap = document.getElementById('modelFilters');",
+    "    if (!wrap || modelEventsBound) return;",
+    "    modelEventsBound = true;",
+    "    wrap.addEventListener('change', function(e) {",
+    "      if (!e.target || e.target.type !== 'checkbox') return;",
+    "      var model = e.target.getAttribute('data-model');",
+    "      if (model === '*') {",
+    "        var checked = e.target.checked;",
+    "        var cbs = wrap.querySelectorAll('input[data-model]');",
+    "        filterState.models = new Set();",
+    "        for (var i = 0; i < cbs.length; i++) {",
+    "          cbs[i].checked = checked;",
+    "          if (checked && cbs[i].getAttribute('data-model') !== '*') {",
+    "            filterState.models.add(cbs[i].getAttribute('data-model'));",
+    "          }",
+    "        }",
+    "        if (!checked) filterState.models = new Set();",
+    "      } else {",
+    "        if (e.target.checked) {",
+    "          filterState.models.add(model);",
+    "        } else {",
+    "          filterState.models.delete(model);",
+    "        }",
+    "        var allCb = wrap.querySelector('input[data-model=\"*\"]');",
+    "        if (allCb) allCb.checked = filterState.models.size === allModels.length;",
+    "      }",
+    "      applyFilters();",
+    "    });",
+    "  }",
+    "",
     "  function render(p) {",
     "    if (!p) return;",
     "    updateI18N(p);",
@@ -476,6 +746,10 @@ function renderDashboardHtml(payload, opts = {}) {
     "    if (lu) lu.textContent = I18N.lastUpdated.replace('{time}', new Date(p.generatedAt).toLocaleString());",
     "    var model = document.getElementById('model');",
     "    if (model) model.textContent = p.model || '';",
+    "    initFilters(p);",
+    "    if (filterState.range !== '30d' || (allModels.length > 0 && filterState.models.size !== allModels.length)) {",
+    "      applyFilters();",
+    "    }",
     "  }",
     "",
     "  function setLive(on) {",
@@ -512,14 +786,15 @@ function renderDashboardHtml(payload, opts = {}) {
     "  }",
     "",
     "  render(window.__AGY_DASH__);",
-    "  setLive(false);",
+    "  bindDateFilterEvents();",
+    "  setLive(false)",
     "  startPolling();",
     "  trySse();",
     "})();"
   ].join('\n');
 
   return `<!DOCTYPE html>
-<html lang="${lang}">
+<html lang="${lang}"${rtlAttr}>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -555,6 +830,17 @@ td.strong{font-weight:600}
 .share{background:var(--panel);border:1px solid var(--border);border-radius:4px;height:12px;min-width:80px;overflow:hidden}
 .share-bar{background:var(--accent);height:100%;border-radius:3px}
 .share-bar:last-child{background:var(--green)}
+.filters{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.filter-group{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.filter-group-label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-right:4px}
+.filter-btn{background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:4px 10px;font-size:11px;cursor:pointer;transition:border-color .15s}
+.filter-btn:hover{border-color:var(--accent)}
+.filter-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.filter-check{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text);cursor:pointer}
+.filter-check input{accent-color:var(--accent)}
+.filter-date-input{background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:11px}
+.filter-sep{color:var(--dim);font-size:11px}
+[dir=rtl] .filter-group{flex-direction:row-reverse}
 </style>
 </head>
 <body>
@@ -564,6 +850,25 @@ td.strong{font-weight:600}
 </header>
 <main>
   <section id="cards" class="cards"></section>
+  <section id="filters" class="filters">
+    <div class="filter-group">
+      <span class="filter-group-label" id="filterDateLabel">${t('filterDate', {}, lang)}</span>
+      <button class="filter-btn active" data-range="30d">${t('filter30d', {}, lang)}</button>
+      <button class="filter-btn" data-range="7d">${t('filter7d', {}, lang)}</button>
+      <button class="filter-btn" data-range="today">${t('filterToday', {}, lang)}</button>
+      <button class="filter-btn" data-range="yesterday">${t('filterYesterday', {}, lang)}</button>
+      <button class="filter-btn" data-range="custom">${t('filterCustom', {}, lang)}</button>
+      <span id="customDateRange" style="display:none">
+        <input type="date" class="filter-date-input" id="filterFrom">
+        <span class="filter-sep">~</span>
+        <input type="date" class="filter-date-input" id="filterTo">
+      </span>
+    </div>
+    <div class="filter-group" id="modelFilters">
+      <span class="filter-group-label" id="filterModelLabel">${t('filterModel', {}, lang)}</span>
+      <!-- model checkboxes populated by JS -->
+    </div>
+  </section>
   <section class="panel"><h2 id="chartTitle">${t('chartTitle', {}, lang)}</h2><div id="chart"></div></section>
   <section class="panel"><h2 id="modelsTitle">${t('modelsTitle', {}, lang)}</h2><div id="modelsWrap"></div></section>
   <section class="panel"><h2 id="tableTitle">${t('tableTitle', {}, lang)}</h2><div id="tableWrap"></div></section>

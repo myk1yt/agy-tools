@@ -658,7 +658,7 @@ function renderHelp() {
     ['--session, -s [id]', t('cliOptSession')],
     ['--all, -a', t('cliOptAll')],
     ['--currency <usd|krw|jpy|eur|gbp>', t('cliOptCurrency')],
-    ['--lang <en|ko|ja|zh>', t('cliOptLang')],
+    ['--lang <en|ko|ja|zh|zh-TW|hi|vi|id|th|de|fr|es|pt|it|nl|pl|sv|ru|ar|he|tr>', t('cliOptLang')],
     ['--model <name>', t('cliOptModel')],
     ['--free, --no-cost', t('cliOptFree')],
     ['--hook, --badge', t('cliOptHook')],

@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20(Pure%20Node.js)-brightgreen.svg)](#zero-dependency-architecture)
 [![Node.js Version](https://img.shields.io/badge/Node.js-%3E%3D16.0.0-green.svg)](https://nodejs.org)
-[![i18n Supported](https://img.shields.io/badge/i18n-EN%20%7C%20KO%20%7C%20JA%20%7C%20ZH-orange.svg)](#internationalization-i18n)
+[![i18n Supported](https://img.shields.io/badge/i18n-21%20Languages-orange.svg)](#internationalization-i18n)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#installation)
 
 **Antigravity Developer Toolkit (`agy-tools`)** is a zero-dependency CLI suite for **Antigravity CLI**. Its flagship **agy-tokens** command is a **statusline-powered real-time token dashboard**. Zero agy modification: one `statusLine` entry in `~/.gemini/antigravity-cli/settings.json` is the ONLY integration point — providing real-time token tracking, prompt cache hit rate analytics, and exact API cost breakdowns across Gemini 3.7 Flash/Pro and Claude 3.7 Sonnet workflows.
@@ -16,7 +16,7 @@
 - 🎯 **High-Precision Subword BPE Tokenizer**: Accurately tokenizes and estimates consumption across programming languages (Dart, Python, JavaScript/TypeScript, Rust, Go, C++, SQL) and human languages (English, Korean, Japanese, Chinese).
 - 🚀 **Sub-10ms Incremental Cache Engine**: Uses atomic JSON cache (`~/.gemini/token_tracker_cache.json`) with file `mtime` change detection to parse hundreds of conversation transcripts in milliseconds.
 - 📊 **Rich ANSI Terminal Dashboard & Summary Cards**: Visual status cards, formatted daily breakdown tables with cache hit percentages, and turn-by-turn session inspection.
-- 🌐 **Full Multi-Language (i18n) Support**: Native auto-locale detection with manual `--lang` override supporting English (`en`), Korean (`ko`), Japanese (`ja`), and Chinese (`zh`).
+- 🌐 **Full Multi-Language (i18n) Support**: Native auto-locale detection with manual `--lang` override supporting 21 languages: English, Korean, Japanese, Chinese (Simplified & Traditional), Hindi, Vietnamese, Indonesian, Thai, German, French, Spanish, Portuguese, Italian, Dutch, Polish, Swedish, Russian, Arabic, Hebrew, and Turkish. RTL support for Arabic and Hebrew.
 - 💱 **Multi-Currency Converter**: Real-time conversion to `USD ($)`, `KRW (₩)`, `JPY (¥)`, `EUR (€)`, and `GBP (£)`.
 - 🔗 **Statusline-Only Integration**: One `statusLine` entry in `~/.gemini/antigravity-cli/settings.json` — nothing inside agy is modified. The badge refreshes the browser dashboard data on every state change via `--write-dashboard` (inside VS Code terminals, a tiny local dashboard server is auto-started on demand — see [Dashboard Link](#-dashboard-link-osc-8) below).
 - 🔒 **100% Privacy Preserving**: Zero network telemetry. All parsing and aggregation executes strictly on your local machine.
@@ -227,6 +227,14 @@ same process (one `syncSessions()` pass shared by both — no double parsing).
 The dashboard HTML self-heals if missing. This is the flag that makes the
 statusline the real-time data writer for the browser dashboard.
 
+### 11. Dashboard Filters (Date Range & Model)
+The HTML dashboard includes interactive filters above the Models section:
+- **Date filter**: Today / Yesterday / Last 7 Days / Last 30 Days / Custom date range
+- **Model filter**: Checkboxes for each model appearing in the data
+- Filters apply to both the Models table and Daily Detail table simultaneously
+- Default: 30 days + all models selected
+- Filter state persists across SSE/poll updates
+
 ---
 
 ## 🎛 Command Line Options Reference
@@ -241,7 +249,7 @@ statusline the real-time data writer for the browser dashboard.
 | `--session [id]` | `-s` | Show turn-by-turn table for latest or specified conversation ID |
 | `--all` | `-a` | Show full historical breakdown across all recorded sessions |
 | `--currency <code>` | | Select display currency (`usd`, `krw`, `jpy`, `eur`, `gbp`) |
-| `--lang <code>` | | Select interface language (`en`, `ko`, `ja`, `zh`) |
+| `--lang <code>` | | Select interface language (21 languages: `en`, `ko`, `ja`, `zh`, `zh-TW`, `hi`, `vi`, `id`, `th`, `de`, `fr`, `es`, `pt`, `it`, `nl`, `pl`, `sv`, `ru`, `ar`, `he`, `tr`) |
 | `--model <name>` | | Override model pricing (`gemini-3.7-flash`, `claude-3.7-sonnet`, etc.) |
 | `--hook`, `--badge` | | Output the statusline badge payload (JSON, or raw string with `--raw`) |
 | `--raw` | | Output raw badge string without PostInvocation JSON wrapper |
@@ -316,6 +324,7 @@ node test/run-tests.js
 ## 🗺️ Roadmap
 
 - [x] **v1.0.0**: High-precision subword BPE token estimation, incremental caching, ANSI terminal dashboard, multi-currency & i18n support.
+- [x] **v3.0.0**: i18n expansion to 21 languages (including RTL support for Arabic/Hebrew), dashboard date-range and model filters with client-side filtering.
 - [ ] **v1.1.0**: Interactive full-screen TUI mode with real-time log tailing and session switching.
 - [ ] **v1.2.0**: Context window utilization heatmaps and long-context cost optimization suggestions.
 - [ ] **v1.3.0**: Multi-workspace quota tracking and automated budget threshold alerts.

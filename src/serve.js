@@ -99,13 +99,19 @@ function startDashboardServer(opts = {}) {
           res.write(': connected\n\n');
 
           let closed = false;
+          let inFlight = false;
           const push = async () => {
-            if (closed) return;
+            if (closed || inFlight) return;
+            inFlight = true;
             try {
               const payload = await aggregate();
-              res.write(`data: ${JSON.stringify(payload)}\n\n`);
+              if (!closed) {
+                res.write(`data: ${JSON.stringify(payload)}\n\n`);
+              }
             } catch (_err) {
               // Keep the stream alive on aggregation errors
+            } finally {
+              inFlight = false;
             }
           };
 
@@ -170,6 +176,9 @@ function stopDashboardServer(server) {
     if (!server) {
       resolve();
       return;
+    }
+    if (typeof server.closeAllConnections === 'function') {
+      try { server.closeAllConnections(); } catch (_e) {}
     }
     server.close(() => resolve());
   });

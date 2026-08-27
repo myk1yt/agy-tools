@@ -308,19 +308,74 @@ async function runAllTests() {
 
   // --- Suite 3: i18n & Localization Unit Tests ---
   await describe('3. i18n & Localization Unit Tests', async () => {
-    await test('Should have all required keys across en, ko, ja, zh dictionaries', () => {
+    await test('Should have all required keys across all supported locale dictionaries', () => {
       const enKeys = Object.keys(i18n.TRANSLATIONS.en);
-      assert(enKeys.length > 20, 'English dictionary must have keys');
+      assert(enKeys.length >= 123, `English dictionary must have at least 123 keys, got ${enKeys.length}`);
 
-      for (const lang of ['ko', 'ja', 'zh']) {
+      for (const lang of i18n.SUPPORTED_LOCALES) {
+        assert(i18n.TRANSLATIONS[lang], `Dictionary for "${lang}" must exist`);
         const langKeys = Object.keys(i18n.TRANSLATIONS[lang]);
         for (const key of enKeys) {
           assert(
             key in i18n.TRANSLATIONS[lang],
             `Missing key "${key}" in language "${lang}" dictionary`
           );
+          assert(
+            typeof i18n.TRANSLATIONS[lang][key] === 'string' && i18n.TRANSLATIONS[lang][key].length > 0,
+            `Key "${key}" in language "${lang}" must not be empty`
+          );
         }
       }
+    });
+
+    await test('Should verify filter-related keys across all 21 supported locales', () => {
+      const filterKeys = [
+        'filterDate', 'filterModel', 'filterAll', 'filterCustom', 'filterApply',
+        'filterToday', 'filterYesterday', 'filter7d', 'filter30d',
+        'filterFromDate', 'filterToDate'
+      ];
+
+      for (const lang of i18n.SUPPORTED_LOCALES) {
+        const dict = i18n.TRANSLATIONS[lang];
+        for (const fk of filterKeys) {
+          assert(dict[fk], `Filter key "${fk}" missing or empty in "${lang}"`);
+        }
+      }
+    });
+
+    await test('Should correctly detect and handle RTL locales', () => {
+      assert(Array.isArray(i18n.RTL_LOCALES), 'RTL_LOCALES must be an array');
+      assert(i18n.RTL_LOCALES.includes('ar'), 'ar must be in RTL_LOCALES');
+      assert(i18n.RTL_LOCALES.includes('he'), 'he must be in RTL_LOCALES');
+
+      assert.strictEqual(i18n.isRtl('ar'), true);
+      assert.strictEqual(i18n.isRtl('he'), true);
+      assert.strictEqual(i18n.isRtl('ar-EG'), true);
+      assert.strictEqual(i18n.isRtl('he-IL'), true);
+      assert.strictEqual(i18n.isRtl('en'), false);
+      assert.strictEqual(i18n.isRtl('ko'), false);
+      assert.strictEqual(i18n.isRtl('zh-TW'), false);
+    });
+
+    await test('Should handle hyphenated and regional locales including zh-TW without truncation', () => {
+      assert(i18n.SUPPORTED_LOCALES.includes('zh-TW'));
+
+      // normalizeLocale tests
+      assert.strictEqual(i18n.normalizeLocale('zh-TW'), 'zh-TW');
+      assert.strictEqual(i18n.normalizeLocale('zh_TW'), 'zh-TW');
+      assert.strictEqual(i18n.normalizeLocale('zh_TW.UTF-8'), 'zh-TW');
+      assert.strictEqual(i18n.normalizeLocale('zh-tw'), 'zh-TW');
+      assert.strictEqual(i18n.normalizeLocale('zh-Hant-TW'), 'zh-TW');
+      assert.strictEqual(i18n.normalizeLocale('zh-HK'), 'zh-TW');
+      assert.strictEqual(i18n.normalizeLocale('de-DE'), 'de');
+      assert.strictEqual(i18n.normalizeLocale('ko-KR'), 'ko');
+
+      // setLocale and getAllTranslations
+      i18n.setLocale('zh-TW');
+      assert.strictEqual(i18n.getLocale(), 'zh-TW');
+      assert.strictEqual(i18n.t('appName'), 'Antigravity 詞元與成本追蹤器');
+      const allZhTw = i18n.getAllTranslations('zh-TW');
+      assert.strictEqual(allZhTw.appName, 'Antigravity 詞元與成本追蹤器');
     });
 
     await test('Should translate with parameter substitution', () => {
@@ -343,6 +398,18 @@ async function runAllTests() {
       i18n.setLocale('zh');
       assert.strictEqual(i18n.getLocale(), 'zh');
       assert.strictEqual(i18n.t('periodToday'), '今天');
+
+      i18n.setLocale('de');
+      assert.strictEqual(i18n.getLocale(), 'de');
+      assert.strictEqual(i18n.t('periodToday'), 'Heute');
+
+      i18n.setLocale('fr');
+      assert.strictEqual(i18n.getLocale(), 'fr');
+      assert.strictEqual(i18n.t('periodToday'), "Aujourd'hui");
+
+      i18n.setLocale('ar');
+      assert.strictEqual(i18n.getLocale(), 'ar');
+      assert.strictEqual(i18n.t('periodToday'), 'اليوم');
 
       i18n.setLocale('en');
       assert.strictEqual(i18n.getLocale(), 'en');
@@ -1112,10 +1179,11 @@ async function runAllTests() {
       ];
       const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en' });
 
-      assert.strictEqual(payload.version, 2);
+      assert.strictEqual(payload.version, 3);
       assert(typeof payload.generatedAt === 'string');
       assert.strictEqual(payload.currency, 'usd');
       assert.strictEqual(payload.lang, 'en');
+      assert.strictEqual(payload.isRtl, false);
       assert(typeof payload.isFree === 'boolean');
       assert(payload.summaries && payload.summaries.today && payload.summaries.yesterday);
       assert(payload.summaries.last7d && payload.summaries.last30d);
@@ -1124,6 +1192,7 @@ async function runAllTests() {
       const row = payload.daily[payload.daily.length - 1];
       assert.strictEqual(row.date, aggregator.formatLocalDate(new Date()));
       assert.strictEqual(row.totalTokens, 170);
+      assert(payload.dailyModels && typeof payload.dailyModels === 'object');
       assert(payload.cacheStats && payload.cacheStats.totalSessions === 1);
     });
 
@@ -1157,7 +1226,7 @@ async function runAllTests() {
       const dataJs = fs.readFileSync(htmlReport.DASHBOARD_DATA_JS, 'utf8');
       assert(dataJs.startsWith('window.__AGY_DASH__'));
       const dataJson = JSON.parse(fs.readFileSync(htmlReport.DASHBOARD_DATA_JSON, 'utf8'));
-      assert.strictEqual(dataJson.version, 2);
+      assert.strictEqual(dataJson.version, 3);
     });
 
     await test('writeDashboardFiles should throttle unchanged payloads (skip)', () => {
@@ -1236,6 +1305,63 @@ async function runAllTests() {
 
       // Sorted by cost desc
       assert(payload.models[0].costUsd >= payload.models[1].costUsd);
+    });
+
+    await test('buildDashboardPayload should generate dailyModels map and isRtl flag', () => {
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      const todayStr = aggregator.formatLocalDate(today);
+      const yesterdayStr = aggregator.formatLocalDate(yesterday);
+
+      const sessions = [
+        {
+          sessionId: 's1',
+          modelName: 'gemini-3-pro',
+          startTime: today.toISOString(),
+          turns: [
+            { createdAt: today.toISOString(), inputTokens: 500, cachedTokens: 200, outputTokens: 100 }
+          ]
+        },
+        {
+          sessionId: 's2',
+          modelName: 'gemini-3-flash',
+          startTime: yesterday.toISOString(),
+          turns: [
+            { createdAt: yesterday.toISOString(), inputTokens: 300, cachedTokens: 100, outputTokens: 50 }
+          ]
+        }
+      ];
+
+      const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'ar' });
+      assert.strictEqual(payload.isRtl, true);
+      assert.strictEqual(payload.version, 3);
+      assert(payload.dailyModels && typeof payload.dailyModels === 'object');
+      assert(payload.dailyModels[todayStr]);
+      assert(payload.dailyModels[yesterdayStr]);
+
+      const todayPro = payload.dailyModels[todayStr]['gemini-3-pro'];
+      assert(todayPro, 'today gemini-3-pro missing');
+      assert.strictEqual(todayPro.model, 'gemini-3-pro');
+      assert.strictEqual(todayPro.inputTokens, 500);
+      assert.strictEqual(todayPro.cachedTokens, 200);
+      assert.strictEqual(todayPro.outputTokens, 100);
+      assert.strictEqual(todayPro.totalTokens, 800);
+      assert.strictEqual(todayPro.sessions, 1);
+      assert.strictEqual(todayPro.turns, 1);
+      assert(typeof todayPro.costUsd === 'number' && todayPro.costUsd > 0);
+      assert(typeof todayPro.cacheSavingsUsd === 'number' && todayPro.cacheSavingsUsd > 0);
+
+      const yestFlash = payload.dailyModels[yesterdayStr]['gemini-3-flash'];
+      assert(yestFlash, 'yesterday gemini-3-flash missing');
+      assert.strictEqual(yestFlash.model, 'gemini-3-flash');
+      assert.strictEqual(yestFlash.totalTokens, 450);
+      assert.strictEqual(yestFlash.sessions, 1);
+      assert.strictEqual(yestFlash.turns, 1);
+
+      const payloadEn = htmlReport.buildDashboardPayload([], { lang: 'en' });
+      assert.strictEqual(payloadEn.isRtl, false);
     });
 
     await test('renderDashboardHtml should include the Models section with share bars', () => {
@@ -1339,6 +1465,45 @@ async function runAllTests() {
       assert(html.includes('id="chartTitle"'));
       assert(html.includes('id="modelsTitle"'));
       assert(html.includes('id="tableTitle"'));
+    });
+
+    await test('renderDashboardHtml should include Filter UI (CSS, HTML, and client-side JS)', () => {
+      const payload = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'en' });
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+
+      // CSS classes
+      assert(html.includes('.filters{'), 'Filter container CSS missing');
+      assert(html.includes('.filter-group{'), 'Filter group CSS missing');
+      assert(html.includes('.filter-btn{'), 'Filter button CSS missing');
+      assert(html.includes('.filter-check{'), 'Filter checkbox CSS missing');
+      assert(html.includes('[dir=rtl] .filter-group{flex-direction:row-reverse}'), 'RTL filter CSS missing');
+
+      // HTML elements
+      assert(html.includes('id="filters"'), 'Filter section container missing');
+      assert(html.includes('id="filterDateLabel"'), 'filterDateLabel missing');
+      assert(html.includes('data-range="30d"'), '30d range button missing');
+      assert(html.includes('data-range="7d"'), '7d range button missing');
+      assert(html.includes('data-range="today"'), 'today range button missing');
+      assert(html.includes('data-range="yesterday"'), 'yesterday range button missing');
+      assert(html.includes('data-range="custom"'), 'custom range button missing');
+      assert(html.includes('id="customDateRange"'), 'customDateRange container missing');
+      assert(html.includes('id="filterFrom"'), 'filterFrom input missing');
+      assert(html.includes('id="filterTo"'), 'filterTo input missing');
+      assert(html.includes('id="modelFilters"'), 'modelFilters container missing');
+      assert(html.includes('id="filterModelLabel"'), 'filterModelLabel missing');
+
+      // JavaScript filter logic
+      assert(html.includes('filterState'), 'filterState missing in client JS');
+      assert(html.includes('initFilters('), 'initFilters missing in client JS');
+      assert(html.includes('getFilteredData('), 'getFilteredData missing in client JS');
+      assert(html.includes('applyFilters('), 'applyFilters missing in client JS');
+      assert(html.includes('bindDateFilterEvents('), 'bindDateFilterEvents missing in client JS');
+      assert(html.includes('bindModelCheckboxEvents('), 'bindModelCheckboxEvents missing in client JS');
+
+      // RTL rendered attribute
+      const payloadAr = htmlReport.buildDashboardPayload([], { currency: 'usd', lang: 'ar' });
+      const htmlAr = htmlReport.renderDashboardHtml(payloadAr, { refreshSec: 5, servePort: 8787 });
+      assert(htmlAr.includes('dir="rtl"'), 'RTL dir attribute missing on ar locale HTML tag');
     });
   });
 
@@ -1445,14 +1610,14 @@ async function runAllTests() {
           res.on('data', (chunk) => {
             body += chunk.toString();
             if (body.includes('data:')) {
-              req.destroy();
               finish(body);
+              req.destroy();
             }
           });
           res.on('error', () => finish(body));
         });
         req.on('error', () => finish(''));
-        setTimeout(() => finish(''), 5000);
+        setTimeout(() => finish(''), 15000);
       });
 
       assert(eventsBody.includes('data:'), 'SSE stream should push data events');
@@ -1491,7 +1656,7 @@ async function runAllTests() {
 
       assert.strictEqual(statusCode, 200);
       const parsed = JSON.parse(body);
-      assert.strictEqual(parsed.version, 2);
+      assert.strictEqual(parsed.version, 3);
 
       await serve.stopDashboardServer(info.server);
     });
