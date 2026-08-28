@@ -13,6 +13,8 @@ const { discoverSessions, parseTranscriptFile, loadHistoryIndex } = require('./l
 // caches so all sessions are re-parsed once with turn-level metadata.
 const CACHE_SCHEMA_VERSION = 4;
 
+let lastValidCache = null;
+
 /**
  * Loads the current tracker cache from disk.
  * @param {string} [customCachePath] - Optional custom path for cache file.
@@ -20,24 +22,33 @@ const CACHE_SCHEMA_VERSION = 4;
  */
 function loadCache(customCachePath = CACHE_FILE) {
   if (!fs.existsSync(customCachePath)) {
-    return {
+    return lastValidCache || {
       version: CACHE_SCHEMA_VERSION,
       lastUpdated: null,
       sessions: {}
     };
   }
 
-  try {
-    const raw = fs.readFileSync(customCachePath, 'utf8');
-    const data = JSON.parse(raw);
-    if (data && data.version === CACHE_SCHEMA_VERSION && typeof data.sessions === 'object') {
-      return data;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const raw = fs.readFileSync(customCachePath, 'utf8');
+      const data = JSON.parse(raw);
+      if (data && data.version === CACHE_SCHEMA_VERSION && typeof data.sessions === 'object') {
+        lastValidCache = JSON.parse(JSON.stringify(data));
+        return data;
+      }
+    } catch (_err) {
+      // Sleep for 20ms using Atomics or fallback to spinlock
+      try {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      } catch (e) {
+        const start = Date.now();
+        while (Date.now() - start < 20) {}
+      }
     }
-  } catch (_err) {
-    // Corrupted cache, return fresh
   }
 
-  return {
+  return lastValidCache || {
     version: CACHE_SCHEMA_VERSION,
     lastUpdated: null,
     sessions: {}
@@ -57,9 +68,33 @@ function saveCache(cacheData, customCachePath = CACHE_FILE) {
     }
 
     cacheData.lastUpdated = new Date().toISOString();
-    const tempFile = `${customCachePath}.${Date.now()}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(cacheData, null, 2), 'utf8');
-    fs.renameSync(tempFile, customCachePath);
+    const content = JSON.stringify(cacheData, null, 2);
+    const tempFile = `${customCachePath}.${Date.now()}.${process.pid}.tmp`;
+    
+    fs.writeFileSync(tempFile, content, 'utf8');
+    
+    let renamed = false;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        fs.renameSync(tempFile, customCachePath);
+        renamed = true;
+        break;
+      } catch (_renameErr) {
+        try {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+        } catch (e) {
+          const start = Date.now();
+          while (Date.now() - start < 25) {}
+        }
+      }
+    }
+
+    if (!renamed) {
+      try { fs.unlinkSync(tempFile); } catch (_e) {}
+      fs.writeFileSync(customCachePath, content, 'utf8');
+    }
+
+    lastValidCache = JSON.parse(JSON.stringify(cacheData));
   } catch (_err) {
     // Graceful fallback if write fails
   }
@@ -95,6 +130,7 @@ function clearCache(customCachePath = CACHE_FILE) {
 async function syncSessions(options = {}) {
   const startTime = Date.now();
   const forceFresh = Boolean(options.forceFresh);
+  const readOnly = Boolean(options.readOnly);
   const brainDir = options.brainDir || BRAIN_DIR;
   const historyPath = options.historyPath || HISTORY_FILE;
   const cachePath = options.cachePath || CACHE_FILE;
@@ -124,11 +160,13 @@ async function syncSessions(options = {}) {
       // Parse or re-parse modified session
       try {
         const metadata = historyMap.get(item.sessionId) || {};
+        const oldTurns = cachedEntry ? cachedEntry.turns : null;
         const parsed = await parseTranscriptFile(
           item.transcriptPath,
           item.sessionId,
           metadata,
-          modelName
+          modelName,
+          oldTurns
         );
 
         parsed.mtimeMs = item.mtimeMs;
@@ -142,7 +180,9 @@ async function syncSessions(options = {}) {
   }
 
   cache.sessions = updatedSessionsMap;
-  saveCache(cache, cachePath);
+  if (!readOnly) {
+    saveCache(cache, cachePath);
+  }
 
   const sessionList = Object.values(updatedSessionsMap).sort(
     (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()

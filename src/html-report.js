@@ -34,7 +34,8 @@ let DASHBOARD_DIR = CONFIG_DASHBOARD_DIR;
 let DASHBOARD_HTML_FILE = CONFIG_DASHBOARD_HTML_FILE;
 let DASHBOARD_DATA_JS = CONFIG_DASHBOARD_DATA_JS;
 let DASHBOARD_DATA_JSON = CONFIG_DASHBOARD_DATA_JSON;
-const { formatLocalDate, summarizeTurns } = require('./aggregator');
+const { formatLocalDate, summarizeTurns, getRollingUsage } = require('./aggregator');
+const geminiQuotaModule = require('./gemini-quota');
 const { t, getLocale, getAllTranslations, isRtl } = require('./i18n');
 
 const DASHBOARD_PAYLOAD_VERSION = 3;
@@ -169,8 +170,11 @@ function buildDashboardPayload(sessions, opts = {}) {
       const turnCost = (typeof turn.costUsd === 'number')
         ? turn.costUsd
         : calculateCostUsd(turn.inputTokens || 0, turn.cachedTokens || 0, turn.outputTokens || 0, turnModel);
+      const turnSavingsUsd = (typeof turn.cacheSavingsUsd === 'number')
+        ? turn.cacheSavingsUsd
+        : calculateCacheSavingsUsd(turn.cachedTokens || 0, turnModel);
       modelRow.costUsd += turnCost;
-      modelRow.cacheSavingsUsd += calculateCacheSavingsUsd(turn.cachedTokens || 0, turnModel);
+      modelRow.cacheSavingsUsd += turnSavingsUsd;
 
       const key = formatLocalDate(new Date(turn.createdAt));
       if (turnsByDate.has(key)) {
@@ -198,6 +202,8 @@ function buildDashboardPayload(sessions, opts = {}) {
           dm.inputTokens += turn.inputTokens || 0;
           dm.cachedTokens += turn.cachedTokens || 0;
           dm.outputTokens += turn.outputTokens || 0;
+          dm.costUsd += turnCost;
+          dm.cacheSavingsUsd += turnSavingsUsd;
           dm.turns += 1;
 
           const dateSessionMap = dailyModelSessions.get(key);
@@ -238,8 +244,8 @@ function buildDashboardPayload(sessions, opts = {}) {
         ? (row.cachedTokens / (row.inputTokens + row.cachedTokens)) * 100
         : 0;
       row.sessions = (sessionMap[model] || new Set()).size;
-      row.costUsd = round6(calculateCostUsd(row.inputTokens, row.cachedTokens, row.outputTokens, model));
-      row.cacheSavingsUsd = round6(calculateCacheSavingsUsd(row.cachedTokens, model));
+      row.costUsd = round6(row.costUsd);
+      row.cacheSavingsUsd = round6(row.cacheSavingsUsd);
       dailyModels[key][model] = row;
     }
   }
@@ -279,6 +285,8 @@ function buildDashboardPayload(sessions, opts = {}) {
 
   const last7dSummary = summarizeRange(dateKeys.slice(23), '7d');
   const last30dSummary = summarizeRange(dateKeys, '30d');
+  const rollingUsage = getRollingUsage(list, refDate, opts.quota || null);
+  const geminiQuota = opts.geminiQuota !== undefined ? opts.geminiQuota : geminiQuotaModule.getCachedGeminiQuota();
 
   return {
     version: DASHBOARD_PAYLOAD_VERSION,
@@ -303,7 +311,9 @@ function buildDashboardPayload(sessions, opts = {}) {
       parsedCount: opts.parsedCount || 0,
       cachedCount: opts.cachedCount || 0,
       elapsedMs: opts.elapsedMs || 0
-    }
+    },
+    rollingUsage,
+    geminiQuota
   };
 }
 
@@ -350,7 +360,11 @@ function dashboardI18n(lang = null) {
     colTotal: dict.colTotal,
     colCacheHit: dict.colCacheHit,
     colCost: dict.colCost,
-    colSavings: dict.colSavings
+    colSavings: dict.colSavings,
+    quotaTitle: dict.quotaTitle,
+    quota5h: dict.quota5h,
+    quota7d: dict.quota7d,
+    remaining: dict.remaining
   };
 }
 
@@ -457,6 +471,7 @@ function renderDashboardHtml(payload, opts = {}) {
     "    el = document.getElementById('model');",
     "    if (el && I18N.activeModel && lastPayload) el.textContent = I18N.activeModel + ': ' + (lastPayload.model || '');",
     "    renderEstimates(lastPayload);",
+    "    if (lastPayload && (lastPayload.rollingUsage || lastPayload.geminiQuota)) renderQuota(lastPayload.rollingUsage, lastPayload.geminiQuota);",
     "",
     "    var filterBtns = document.querySelectorAll('.filter-btn[data-range]');",
     "    var rangeKeys = { '30d': 'filter30d', '7d': 'filter7d', 'today': 'filterToday', 'yesterday': 'filterYesterday', 'custom': 'filterCustom' };",
@@ -867,6 +882,73 @@ function renderDashboardHtml(payload, opts = {}) {
     "    return { daily: filteredDaily, models: filteredModels, summary: filteredSummary };",
     "  }",
     "",
+    "  function renderQuota(r, gq) {",
+    "    if (!r && !gq) return;",
+    "    var w = document.getElementById('quotaWrap');",
+    "    if (!w) return;",
+    "    var html = '<div class=\"card\" style=\"width:100%;\"><div class=\"card-label\" style=\"display:flex;justify-content:space-between;align-items:center;\">' +",
+    "      '<span>' + esc(I18N.quotaTitle || 'Rate Limits & Quota') + '</span>';",
+    "    if (gq && gq.remainPercent !== null && gq.remainPercent !== undefined) {",
+    "      var liveBadge = gq.isLive",
+    "        ? '<span style=\"font-size:10px;padding:2px 6px;background:rgba(63,185,80,0.15);color:#3fb950;border:1px solid #3fb950;border-radius:10px;font-weight:600;\">\\u25cf ' + esc(I18N.quotaLive || 'LIVE') + '</span>'",
+    "        : '<span style=\"font-size:10px;padding:2px 6px;background:rgba(139,148,158,0.15);color:#8b949e;border:1px solid var(--border);border-radius:10px;\">' + esc(I18N.quotaFallback || 'ESTIMATE') + '</span>';",
+    "      html += liveBadge;",
+    "    }",
+    "    html += '</div>';",
+    "    if (gq && (gq.quota5h || gq.quota7d)) {",
+    "      if (gq.quota5h && gq.quota5h.remainPercent !== null && gq.quota5h.remainPercent !== undefined) {",
+    "        var pct5 = Math.max(0, Math.min(100, Number(gq.quota5h.remainPercent) || 0));",
+    "        var reset5 = gq.quota5h.resetFormatted ? ' (' + esc(I18N.quotaReset || 'Reset') + ' ' + esc(gq.quota5h.resetFormatted) + ')' : '';",
+    "        html += '<div style=\"margin-top:14px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;\">' +",
+    "          '<div style=\"font-size:13px;color:var(--text);display:flex;justify-content:space-between;align-items:center;\">' +",
+    "          '<span class=\"strong\" style=\"color:var(--accent);\">Gemini ' + esc(I18N.quota5h || '5h') + '</span>' +",
+    "          '<span class=\"strong\" style=\"color:#3fb950;\">' + pct5 + '% ' + esc(I18N.remaining || 'rem.') + '<span style=\"color:var(--dim);font-weight:normal;font-size:11px;\">' + reset5 + '</span></span></div>' +",
+    "          '<div style=\"margin-top:8px;height:10px;background:var(--border);border-radius:5px;overflow:hidden;\">' +",
+    "          '<div style=\"height:100%;background:linear-gradient(90deg, #58a6ff, #3fb950);width:' + pct5 + '%;transition:width 0.5s ease;\"></div></div>' +",
+    "          '</div>';",
+    "      }",
+    "      if (gq.quota7d && gq.quota7d.remainPercent !== null && gq.quota7d.remainPercent !== undefined) {",
+    "        var pct7 = Math.max(0, Math.min(100, Number(gq.quota7d.remainPercent) || 0));",
+    "        var reset7 = gq.quota7d.resetFormatted ? ' (' + esc(I18N.quotaReset || 'Reset') + ' ' + esc(gq.quota7d.resetFormatted) + ')' : '';",
+    "        html += '<div style=\"margin-top:10px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;\">' +",
+    "          '<div style=\"font-size:13px;color:var(--text);display:flex;justify-content:space-between;align-items:center;\">' +",
+    "          '<span class=\"strong\" style=\"color:var(--accent);\">Gemini ' + esc(I18N.quota7d || '7d') + '</span>' +",
+    "          '<span class=\"strong\" style=\"color:#3fb950;\">' + pct7 + '% ' + esc(I18N.remaining || 'rem.') + '<span style=\"color:var(--dim);font-weight:normal;font-size:11px;\">' + reset7 + '</span></span></div>' +",
+    "          '<div style=\"margin-top:8px;height:10px;background:var(--border);border-radius:5px;overflow:hidden;\">' +",
+    "          '<div style=\"height:100%;background:linear-gradient(90deg, #d29922, #3fb950);width:' + pct7 + '%;transition:width 0.5s ease;\"></div></div>' +",
+    "          '</div>';",
+    "      }",
+    "    } else if (gq && gq.remainPercent !== null && gq.remainPercent !== undefined) {",
+    "      var gPct = Math.max(0, Math.min(100, Number(gq.remainPercent) || 0));",
+    "      var resetInfo = gq.resetFormatted ? ' (' + esc(I18N.quotaReset || 'Reset') + ' ' + esc(gq.resetFormatted) + ')' : '';",
+    "      html += '<div style=\"margin-top:14px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;\">' +",
+    "        '<div style=\"font-size:13px;color:var(--text);display:flex;justify-content:space-between;align-items:center;\">' +",
+    "        '<span class=\"strong\" style=\"color:var(--accent);\">' + esc(I18N.quotaGemini || 'Gemini Quota Pool') + '</span>' +",
+    "        '<span class=\"strong\" style=\"color:#3fb950;\">' + gPct + '% ' + esc(I18N.remaining || 'rem.') + '<span style=\"color:var(--dim);font-weight:normal;font-size:11px;\">' + resetInfo + '</span></span></div>' +",
+    "        '<div style=\"margin-top:8px;height:10px;background:var(--border);border-radius:5px;overflow:hidden;\">' +",
+    "        '<div style=\"height:100%;background:linear-gradient(90deg, #58a6ff, #3fb950);width:' + gPct + '%;transition:width 0.5s ease;\"></div></div>' +",
+    "        '</div>';",
+    "    }",
+    "    if (r && (!gq || gq.remainPercent === null || gq.remainPercent === undefined)) {",
+    "      var u5h = Math.min(100, Math.max(0, Number(r.used5hPercent) || 0));",
+    "      var r5h = Math.max(0, Number(r.remain5hPercent) || 0);",
+    "      var u7d = Math.min(100, Math.max(0, Number(r.used7dPercent) || 0));",
+    "      var r7d = Math.max(0, Number(r.remain7dPercent) || 0);",
+    "      html += '<div style=\"margin-top:12px;font-size:13px;color:var(--text);display:flex;justify-content:space-between;\">' +",
+    "        '<span>' + esc(I18N.quota5h || '5h') + ': ' + fmtCompact(r.tokens5h) + ' / ' + fmtCompact(r.limit5h) + '</span>' +",
+    "        '<span class=\"strong\">' + esc(r5h.toFixed(1)) + '% ' + esc(I18N.remaining || 'rem.') + '</span></div>';",
+    "      html += '<div style=\"margin-top:4px;height:8px;background:var(--border);border-radius:4px;overflow:hidden;\">' +",
+    "        '<div style=\"height:100%;background:linear-gradient(90deg, #3fb950, #58a6ff);width:' + u5h + '%;transition:width 0.5s ease;\"></div></div>';",
+    "      html += '<div style=\"margin-top:16px;font-size:13px;color:var(--text);display:flex;justify-content:space-between;\">' +",
+    "        '<span>' + esc(I18N.quota7d || '7d') + ': ' + fmtCompact(r.tokens7d) + ' / ' + fmtCompact(r.limit7d) + '</span>' +",
+    "        '<span class=\"strong\">' + esc(r7d.toFixed(1)) + '% ' + esc(I18N.remaining || 'rem.') + '</span></div>';",
+    "      html += '<div style=\"margin-top:4px;height:8px;background:var(--border);border-radius:4px;overflow:hidden;\">' +",
+    "        '<div style=\"height:100%;background:linear-gradient(90deg, #d29922, #f778ba);width:' + u7d + '%;transition:width 0.5s ease;\"></div></div>';",
+    "    }",
+    "    html += '</div>';",
+    "    w.innerHTML = html;",
+    "  }",
+    "",
     "  function applyFilters() {",
     "    if (!lastPayload) return;",
     "    var filtered = getFilteredData(lastPayload);",
@@ -880,6 +962,7 @@ function renderDashboardHtml(payload, opts = {}) {
     "      cards += cardHtml(I18N.filterCustom || 'Custom', filtered.summary);",
     "    }",
     "    document.getElementById('cards').innerHTML = cards;",
+    "    if (lastPayload.rollingUsage || lastPayload.geminiQuota) renderQuota(lastPayload.rollingUsage, lastPayload.geminiQuota);",
     "  }",
     "",
     "  function bindDateFilterEvents() {",
@@ -958,6 +1041,7 @@ function renderDashboardHtml(payload, opts = {}) {
     "    var model = document.getElementById('model');",
     "    if (model) model.textContent = (I18N.activeModel ? I18N.activeModel + ': ' : '') + (p.model || '');",
     "    renderEstimates(p);",
+    "    if (p.rollingUsage || p.geminiQuota) renderQuota(p.rollingUsage, p.geminiQuota);",
     "  }",
     "",
     "  function setLive(on) {",
@@ -1119,6 +1203,7 @@ td.strong{font-weight:600}
       <div class="estimate-note" id="estimatePanelNote">${t('estimateDisclaimer', {}, lang)}</div>
     </section>
   </div>
+  <div id="quotaWrap" style="margin-bottom:20px;"></div>
   <section id="filters" class="filters">
     <div class="filter-group">
       <span class="filter-group-label" id="filterDateLabel">${t('filterDate', {}, lang)}</span>

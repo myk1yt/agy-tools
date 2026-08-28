@@ -15,6 +15,7 @@ const aggregator = require('./aggregator');
 const formatter = require('./formatter');
 const hookHandler = require('./hook-handler');
 const priceSyncer = require('./price-syncer');
+const geminiQuota = require('./gemini-quota');
 const htmlReport = require('./html-report');
 const serve = require('./serve');
 const osc8 = require('./osc8');
@@ -53,6 +54,7 @@ function parseArgs(argv) {
     hook: false,
     fresh: false,
     sync: false,
+    syncQuota: false,
     prices: false,
     autoSync: false,
     noColor: false,
@@ -125,6 +127,8 @@ function parseArgs(argv) {
       options.fresh = true;
     } else if (arg === 'sync-prices' || arg === 'sync' || arg === '--sync' || arg === '--sync-prices') {
       options.sync = true;
+    } else if (arg === 'sync-quota' || arg === '--sync-quota' || arg === 'quota' || arg === '--quota') {
+      options.syncQuota = true;
     } else if (arg === 'prices' || arg === 'models' || arg === '--prices' || arg === '--models') {
       options.prices = true;
     } else if (arg === '--auto-sync') {
@@ -172,6 +176,7 @@ function parseArgs(argv) {
     !options.all &&
     !options.hook &&
     !options.sync &&
+    !options.syncQuota &&
     !options.prices &&
     !options.html &&
     !options.serve &&
@@ -192,7 +197,7 @@ function openInBrowser(url) {
   try {
     if (process.platform === 'win32') {
       const { spawn } = require('child_process');
-      spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref();
+      spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     } else if (process.platform === 'darwin') {
       const { exec } = require('child_process');
       exec(`open ${JSON.stringify(url)}`);
@@ -269,6 +274,29 @@ async function runCli(argv = process.argv) {
     return;
   }
 
+  // 1b. Sync Gemini Quota Subcommand
+  if (options.syncQuota) {
+    const quotaRes = await geminiQuota.fetchLiveGeminiQuota();
+    if (options.json) {
+      console.log(JSON.stringify(quotaRes, null, 2));
+      return;
+    }
+
+    if (quotaRes.isLive) {
+      console.log(`\n  ${formatter.styleText('✔', 'brightGreen')} ${formatter.styleText(i18n.t('syncQuotaSuccess', { percent: quotaRes.remainPercent, reset: quotaRes.resetFormatted || 'N/A' }), 'bold')}`);
+      if (quotaRes.quota5h && quotaRes.quota7d) {
+        console.log(`  ${formatter.styleText('↳', 'gray')} 5h: ${quotaRes.quota5h.remainPercent}% (${quotaRes.quota5h.resetFormatted || 'N/A'}) | 7d: ${quotaRes.quota7d.remainPercent}% (${quotaRes.quota7d.resetFormatted || 'N/A'})`);
+      }
+      console.log(`  ${formatter.styleText('↳', 'gray')} ${quotaRes.cacheFile}\n`);
+    } else {
+      console.log(`\n  ${formatter.styleText('⚠', 'brightYellow')} ${i18n.t('syncQuotaFailed', { error: quotaRes.error || 'Language server not running' })}`);
+      if (quotaRes.cacheFile) {
+        console.log(`  ${formatter.styleText('↳', 'gray')} ${quotaRes.cacheFile}\n`);
+      }
+    }
+    return;
+  }
+
   // 2. Prices / Models Catalog Table Subcommand
   if (options.prices) {
     const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
@@ -299,7 +327,8 @@ async function runCli(argv = process.argv) {
       modelName: activeModel,
       parsedCount: syncResult.parsedCount,
       cachedCount: syncResult.cachedCount,
-      elapsedMs: syncResult.elapsedMs
+      elapsedMs: syncResult.elapsedMs,
+      quota: userConfig.quota
     });
     htmlReport.writeDashboardFiles(payload, {
       force: true,
@@ -392,13 +421,16 @@ async function runCli(argv = process.argv) {
         modelName: activeModel
       });
 
+      const rollingUsage = aggregator.getRollingUsage(syncResult.sessions, new Date(), userConfig.quota);
+
       const result = await hookHandler.handlePostInvocation({
         currency,
         modelName: options.model,
         isFree,
         stdinContext,
         sessions: syncResult.sessions,
-        link: dashboardLink
+        link: dashboardLink,
+        rollingUsage
       });
 
       if (options.writeDashboard) {
@@ -430,7 +462,8 @@ async function runCli(argv = process.argv) {
             modelName: activeModel,
             parsedCount: syncResult.parsedCount,
             cachedCount: syncResult.cachedCount,
-            elapsedMs: syncResult.elapsedMs
+            elapsedMs: syncResult.elapsedMs,
+            quota: userConfig.quota
           });
           htmlReport.writeDashboardFiles(payload, {
             refreshSec: options.refreshSec,
@@ -586,6 +619,7 @@ module.exports = {
   formatter,
   hookHandler,
   priceSyncer,
+  geminiQuota,
   parseArgs,
   runCli
 };

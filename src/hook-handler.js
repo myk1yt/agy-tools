@@ -8,6 +8,7 @@
 const { syncSessions } = require('./cache-manager');
 const { getToday } = require('./aggregator');
 const { renderRealTimeBadge } = require('./formatter');
+const geminiQuota = require('./gemini-quota');
 
 /**
  * Asynchronously reads JSON payload from process.stdin if piped.
@@ -32,6 +33,10 @@ function readStdinJson(timeoutMs = 50) {
       process.stdin.removeListener('end', onEnd);
       process.stdin.removeListener('error', onError);
       process.stdin.on('error', () => {});
+      process.stdin.pause();
+      if (typeof process.stdin.unref === 'function') {
+        process.stdin.unref();
+      }
 
       if (!raw || !raw.trim()) {
         resolve(null);
@@ -135,13 +140,23 @@ async function handlePostInvocation(options = {}) {
   const turnCostUsd = isFree ? 0 : (latestTurn ? latestTurn.costUsd : 0);
   const todayCostUsd = isFree ? 0 : todaySummary.costUsd;
 
+  const currentGeminiQuota = options.geminiQuota !== undefined
+    ? options.geminiQuota
+    : geminiQuota.getCachedGeminiQuota();
+
+  if (!currentGeminiQuota || !currentGeminiQuota.isFresh) {
+    geminiQuota.triggerBackgroundQuotaRefresh();
+  }
+
   const badgeData = {
     turnTokens,
     turnCostUsd,
     todayTokens: todaySummary.totalTokens,
     todayCostUsd,
     cacheHitRate: todaySummary.cacheHitRate,
-    isFree
+    isFree,
+    rollingUsage: options.rollingUsage || null,
+    geminiQuota: currentGeminiQuota
   };
 
   // W1: optional OSC 8 link segment (📊 Dashboard) built by the CLI hook

@@ -3,7 +3,7 @@
  * Computes token sums, cache hit rates, cost estimates, and daily trends.
  */
 
-const { calculateCostUsd, calculateCacheSavingsUsd, convertCurrency } = require('./config');
+const { calculateCostUsd, calculateCacheSavingsUsd, convertCurrency, DEFAULT_QUOTA_5H, DEFAULT_QUOTA_7D } = require('./config');
 
 /**
  * Formats a Date object to YYYY-MM-DD string in local time.
@@ -61,6 +61,7 @@ function summarizeTurns(turns, modelName = null) {
   summary.totalTurns = turns.length;
 
   let hasPerTurnCosts = turns.length > 0;
+  let hasPerTurnSavings = turns.length > 0;
   for (const turn of turns) {
     summary.inputTokens += turn.inputTokens || 0;
     summary.cachedTokens += turn.cachedTokens || 0;
@@ -69,6 +70,11 @@ function summarizeTurns(turns, modelName = null) {
       summary.costUsd += turn.costUsd;
     } else {
       hasPerTurnCosts = false;
+    }
+    if (typeof turn.cacheSavingsUsd === 'number') {
+      summary.cacheSavingsUsd += turn.cacheSavingsUsd;
+    } else {
+      hasPerTurnSavings = false;
     }
   }
 
@@ -85,9 +91,129 @@ function summarizeTurns(turns, modelName = null) {
     );
   }
 
-  summary.cacheSavingsUsd = calculateCacheSavingsUsd(summary.cachedTokens, modelName);
+  if (!hasPerTurnSavings) {
+    summary.cacheSavingsUsd = calculateCacheSavingsUsd(summary.cachedTokens, modelName);
+  }
 
   return summary;
+}
+
+
+/**
+ * Unifies date-bucketing logic into a single pass engine.
+ * @param {Array<object>} sessions
+ * @param {string} [modelName]
+ * @returns {object} Bucket maps
+ */
+function bucketSessionsByDate(sessions, modelName = null) {
+  const turnsByDate = new Map();
+  const sessionIdsByDate = new Map();
+  const dailyModelsMap = new Map();
+  const dailyModelSessions = new Map();
+  const modelsMap = new Map();
+
+  for (const session of (Array.isArray(sessions) ? sessions : [])) {
+    const sId = session.sessionId !== undefined ? session.sessionId : session;
+
+    if (!session || !Array.isArray(session.turns) || session.turns.length === 0) {
+      if (session && session.startTime) {
+        const key = formatLocalDate(new Date(session.startTime));
+        if (!turnsByDate.has(key)) {
+          turnsByDate.set(key, []);
+          sessionIdsByDate.set(key, new Set());
+          dailyModelsMap.set(key, {});
+          dailyModelSessions.set(key, {});
+        }
+        sessionIdsByDate.get(key).add(sId);
+      }
+      continue;
+    }
+
+    const sessionFallbackModel = session.modelName || modelName || 'unknown';
+    const modelsSeenInSession = new Set();
+
+    for (const turn of session.turns) {
+      if (!turn) continue;
+      const turnModel = turn.modelName || sessionFallbackModel;
+      let modelRow = modelsMap.get(turnModel);
+      if (!modelRow) {
+        modelRow = {
+          model: turnModel,
+          displayName: turnModel,
+          totalTokens: 0,
+          inputTokens: 0,
+          cachedTokens: 0,
+          outputTokens: 0,
+          cacheHitRate: 0,
+          costUsd: 0,
+          cacheSavingsUsd: 0,
+          sessions: 0,
+          turns: 0
+        };
+        modelsMap.set(turnModel, modelRow);
+      }
+      if (!modelsSeenInSession.has(turnModel)) {
+        modelRow.sessions += 1;
+        modelsSeenInSession.add(turnModel);
+      }
+      modelRow.turns += 1;
+      modelRow.inputTokens += turn.inputTokens || 0;
+      modelRow.cachedTokens += turn.cachedTokens || 0;
+      modelRow.outputTokens += turn.outputTokens || 0;
+
+      const turnCost = (typeof turn.costUsd === 'number')
+        ? turn.costUsd
+        : calculateCostUsd(turn.inputTokens || 0, turn.cachedTokens || 0, turn.outputTokens || 0, turnModel);
+      modelRow.costUsd += turnCost;
+      modelRow.cacheSavingsUsd += calculateCacheSavingsUsd(turn.cachedTokens || 0, turnModel);
+
+      const key = formatLocalDate(new Date(turn.createdAt));
+      
+      if (!turnsByDate.has(key)) {
+        turnsByDate.set(key, []);
+        sessionIdsByDate.set(key, new Set());
+        dailyModelsMap.set(key, {});
+        dailyModelSessions.set(key, {});
+      }
+      
+      turnsByDate.get(key).push(turn);
+      sessionIdsByDate.get(key).add(sId);
+
+      const dateModelMap = dailyModelsMap.get(key);
+      if (!dateModelMap[turnModel]) {
+        dateModelMap[turnModel] = {
+          model: turnModel,
+          displayName: turnModel,
+          totalTokens: 0,
+          inputTokens: 0,
+          cachedTokens: 0,
+          outputTokens: 0,
+          cacheHitRate: 0,
+          costUsd: 0,
+          cacheSavingsUsd: 0,
+          sessions: 0,
+          turns: 0
+        };
+      }
+      const dm = dateModelMap[turnModel];
+      dm.inputTokens += turn.inputTokens || 0;
+      dm.cachedTokens += turn.cachedTokens || 0;
+      dm.outputTokens += turn.outputTokens || 0;
+      dm.turns += 1;
+      const turnSavingsUsd = (typeof turn.cacheSavingsUsd === 'number') ? turn.cacheSavingsUsd : calculateCacheSavingsUsd(turn.cachedTokens || 0, turnModel);
+
+      dm.costUsd += turnCost;
+      dm.cacheSavingsUsd += turnSavingsUsd;
+
+      const dateSessionMap = dailyModelSessions.get(key);
+      if (!dateSessionMap[turnModel]) {
+        dateSessionMap[turnModel] = new Set();
+      }
+      dateSessionMap[turnModel].add(sId);
+    }
+  }
+
+  return { turnsByDate, sessionIdsByDate, dailyModelsMap, dailyModelSessions, modelsMap };
 }
 
 /**
@@ -99,30 +225,10 @@ function summarizeTurns(turns, modelName = null) {
  */
 function getToday(sessions, refDate = new Date(), modelName = null) {
   const targetDateStr = formatLocalDate(refDate);
-  const matchingTurns = [];
-  const matchingSessionIds = new Set();
+  const { turnsByDate, sessionIdsByDate } = bucketSessionsByDate(sessions, modelName);
 
-  for (const session of sessions) {
-    let sessionHasTodayTurn = false;
-    if (session.turns && session.turns.length > 0) {
-      for (const turn of session.turns) {
-        const turnDateStr = formatLocalDate(new Date(turn.createdAt));
-        if (turnDateStr === targetDateStr) {
-          matchingTurns.push(turn);
-          sessionHasTodayTurn = true;
-        }
-      }
-    } else if (session.startTime) {
-      const sessionDateStr = formatLocalDate(new Date(session.startTime));
-      if (sessionDateStr === targetDateStr) {
-        sessionHasTodayTurn = true;
-      }
-    }
-
-    if (sessionHasTodayTurn) {
-      matchingSessionIds.add(session.sessionId);
-    }
-  }
+  const matchingTurns = turnsByDate.get(targetDateStr) || [];
+  const matchingSessionIds = sessionIdsByDate.get(targetDateStr) || new Set();
 
   const summary = summarizeTurns(matchingTurns, modelName);
   summary.totalSessions = matchingSessionIds.size;
@@ -144,30 +250,10 @@ function getYesterday(sessions, refDate = new Date(), modelName = null) {
   yesterday.setDate(yesterday.getDate() - 1);
   const targetDateStr = formatLocalDate(yesterday);
 
-  const matchingTurns = [];
-  const matchingSessionIds = new Set();
+  const { turnsByDate, sessionIdsByDate } = bucketSessionsByDate(sessions, modelName);
 
-  for (const session of sessions) {
-    let sessionHasYesterdayTurn = false;
-    if (session.turns && session.turns.length > 0) {
-      for (const turn of session.turns) {
-        const turnDateStr = formatLocalDate(new Date(turn.createdAt));
-        if (turnDateStr === targetDateStr) {
-          matchingTurns.push(turn);
-          sessionHasYesterdayTurn = true;
-        }
-      }
-    } else if (session.startTime) {
-      const sessionDateStr = formatLocalDate(new Date(session.startTime));
-      if (sessionDateStr === targetDateStr) {
-        sessionHasYesterdayTurn = true;
-      }
-    }
-
-    if (sessionHasYesterdayTurn) {
-      matchingSessionIds.add(session.sessionId);
-    }
-  }
+  const matchingTurns = turnsByDate.get(targetDateStr) || [];
+  const matchingSessionIds = sessionIdsByDate.get(targetDateStr) || new Set();
 
   const summary = summarizeTurns(matchingTurns, modelName);
   summary.totalSessions = matchingSessionIds.size;
@@ -186,49 +272,30 @@ function getYesterday(sessions, refDate = new Date(), modelName = null) {
  * @returns {object} Daily breakdown and grand total.
  */
 function getLastNDays(sessions, nDays = 7, refDate = new Date(), modelName = null) {
-  const dailyMap = new Map();
   const dateList = [];
-
-  // Generate ordered list of dates from oldest to newest
   for (let i = nDays - 1; i >= 0; i--) {
     const d = new Date(refDate);
     d.setDate(d.getDate() - i);
-    const dateStr = formatLocalDate(d);
-    dateList.push(dateStr);
-    dailyMap.set(dateStr, {
-      date: dateStr,
-      sessions: new Set(),
-      turns: []
-    });
+    dateList.push(formatLocalDate(d));
   }
 
-  // Distribute turns into corresponding date buckets
-  for (const session of sessions) {
-    if (session.turns && session.turns.length > 0) {
-      for (const turn of session.turns) {
-        const turnDateStr = formatLocalDate(new Date(turn.createdAt));
-        if (dailyMap.has(turnDateStr)) {
-          const bucket = dailyMap.get(turnDateStr);
-          bucket.turns.push(turn);
-          bucket.sessions.add(session.sessionId);
-        }
-      }
-    }
-  }
+  const { turnsByDate, sessionIdsByDate } = bucketSessionsByDate(sessions, modelName);
 
   const dailyBreakdown = [];
   const allTurns = [];
   const allSessionIds = new Set();
 
   for (const dateStr of dateList) {
-    const bucket = dailyMap.get(dateStr);
-    const daySummary = summarizeTurns(bucket.turns, modelName);
+    const turns = turnsByDate.get(dateStr) || [];
+    const sessionsSet = sessionIdsByDate.get(dateStr) || new Set();
+
+    const daySummary = summarizeTurns(turns, modelName);
     daySummary.date = dateStr;
-    daySummary.sessions = bucket.sessions.size;
+    daySummary.sessions = sessionsSet.size;
     dailyBreakdown.push(daySummary);
 
-    for (const t of bucket.turns) allTurns.push(t);
-    for (const s of bucket.sessions) allSessionIds.add(s);
+    for (const t of turns) allTurns.push(t);
+    for (const s of sessionsSet) allSessionIds.add(s);
   }
 
   const grandTotal = summarizeTurns(allTurns, modelName);
@@ -249,64 +316,40 @@ function getLastNDays(sessions, nDays = 7, refDate = new Date(), modelName = nul
  */
 function getDateRange(sessions, rangeStr, modelName = null) {
   const parts = rangeStr.split(/\.\.|:/);
-  if (parts.length !== 2) {
-    throw new Error('Invalid date range format. Expected YYYY-MM-DD..YYYY-MM-DD');
-  }
+  if (parts.length !== 2) throw new Error('Invalid date range format. Expected YYYY-MM-DD..YYYY-MM-DD');
 
   const start = parseLocalDate(parts[0]);
   const end = parseLocalDate(parts[1]);
-
-  if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime())) {
-    throw new Error('Invalid date range format. Expected YYYY-MM-DD..YYYY-MM-DD');
-  }
+  if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime())) throw new Error('Invalid date range format. Expected YYYY-MM-DD..YYYY-MM-DD');
 
   const startTime = start.getTime();
   const endTime = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999).getTime();
+  if (startTime > endTime) throw new Error('Start date must be before or equal to end date.');
 
-  if (startTime > endTime) {
-    throw new Error('Start date must be before or equal to end date.');
-  }
-
-  const dailyMap = new Map();
+  const dateList = [];
   const cur = new Date(start);
   while (cur <= end) {
-    const dateStr = formatLocalDate(cur);
-    dailyMap.set(dateStr, {
-      date: dateStr,
-      sessions: new Set(),
-      turns: []
-    });
+    dateList.push(formatLocalDate(cur));
     cur.setDate(cur.getDate() + 1);
   }
 
-  for (const session of sessions) {
-    if (session.turns && session.turns.length > 0) {
-      for (const turn of session.turns) {
-        const turnTime = new Date(turn.createdAt).getTime();
-        if (turnTime >= startTime && turnTime <= endTime) {
-          const dateStr = formatLocalDate(new Date(turn.createdAt));
-          if (dailyMap.has(dateStr)) {
-            const bucket = dailyMap.get(dateStr);
-            bucket.turns.push(turn);
-            bucket.sessions.add(session.sessionId);
-          }
-        }
-      }
-    }
-  }
+  const { turnsByDate, sessionIdsByDate } = bucketSessionsByDate(sessions, modelName);
 
   const dailyBreakdown = [];
   const allTurns = [];
   const allSessionIds = new Set();
 
-  for (const [dateStr, bucket] of dailyMap.entries()) {
-    const daySummary = summarizeTurns(bucket.turns, modelName);
+  for (const dateStr of dateList) {
+    const turns = turnsByDate.get(dateStr) || [];
+    const sessionsSet = sessionIdsByDate.get(dateStr) || new Set();
+
+    const daySummary = summarizeTurns(turns, modelName);
     daySummary.date = dateStr;
-    daySummary.sessions = bucket.sessions.size;
+    daySummary.sessions = sessionsSet.size;
     dailyBreakdown.push(daySummary);
 
-    for (const t of bucket.turns) allTurns.push(t);
-    for (const s of bucket.sessions) allSessionIds.add(s);
+    for (const t of turns) allTurns.push(t);
+    for (const s of sessionsSet) allSessionIds.add(s);
   }
 
   const grandTotal = summarizeTurns(allTurns, modelName);
@@ -344,52 +387,105 @@ function getSessionDrilldown(sessions, sessionId = null) {
  * @returns {object} All-time summary.
  */
 function getAllTime(sessions, modelName = null) {
+  const { turnsByDate, sessionIdsByDate } = bucketSessionsByDate(sessions, modelName);
+
   const allTurns = [];
   const allSessionIds = new Set();
-  const dailyMap = new Map();
+  const sortedDates = Array.from(turnsByDate.keys()).sort();
 
-  for (const session of sessions) {
-    allSessionIds.add(session.sessionId);
-    if (session.turns && session.turns.length > 0) {
-      for (const turn of session.turns) {
-        allTurns.push(turn);
-        const dateStr = formatLocalDate(new Date(turn.createdAt));
-        if (!dailyMap.has(dateStr)) {
-          dailyMap.set(dateStr, {
-            date: dateStr,
-            sessions: new Set(),
-            turns: []
-          });
-        }
-        const bucket = dailyMap.get(dateStr);
-        bucket.turns.push(turn);
-        bucket.sessions.add(session.sessionId);
-      }
-    }
-  }
-
-  const sortedDates = Array.from(dailyMap.keys()).sort();
   const dailyBreakdown = sortedDates.map(dateStr => {
-    const bucket = dailyMap.get(dateStr);
-    const daySummary = summarizeTurns(bucket.turns, modelName);
+    const turns = turnsByDate.get(dateStr) || [];
+    const sessionsSet = sessionIdsByDate.get(dateStr) || new Set();
+
+    const daySummary = summarizeTurns(turns, modelName);
     daySummary.date = dateStr;
-    daySummary.sessions = bucket.sessions.size;
+    daySummary.sessions = sessionsSet.size;
+
+    for (const t of turns) allTurns.push(t);
+    for (const s of sessionsSet) allSessionIds.add(s);
+
     return daySummary;
   });
 
   const grandTotal = summarizeTurns(allTurns, modelName);
   grandTotal.totalSessions = allSessionIds.size;
   grandTotal.period = 'all';
-  grandTotal.dateRange =
-    sortedDates.length > 0
-      ? `${sortedDates[0]}..${sortedDates[sortedDates.length - 1]}`
-      : 'all-time';
+  grandTotal.dateRange = sortedDates.length > 0 ? `${sortedDates[0]}..${sortedDates[sortedDates.length - 1]}` : 'all-time';
   grandTotal.daily = dailyBreakdown;
 
   return grandTotal;
 }
 
+/**
+ * Computes 5-hour and 7-day rolling usage quota based on absolute time.
+ * @param {Array<object>} sessions - List of parsed session objects.
+ * @param {Date} [refDate] - Reference date (defaults to new Date()).
+ * @param {object} [quota] - Quota configuration.
+ * @returns {object} Rolling usage statistics.
+ */
+function getRollingUsage(sessions, refDate = new Date(), quota = null) {
+  const now = (refDate instanceof Date ? refDate : new Date(refDate)).getTime();
+  const limit5h = (quota && Number(quota.limit5h) > 0) ? Number(quota.limit5h) : (DEFAULT_QUOTA_5H || 20000000);
+  const limit7d = (quota && Number(quota.limit7d) > 0) ? Number(quota.limit7d) : (DEFAULT_QUOTA_7D || 150000000);
+
+  const threshold5h = now - 5 * 3600 * 1000;
+  const threshold7d = now - 7 * 86400 * 1000;
+
+  let tokens5h = 0;
+  let tokens7d = 0;
+
+  for (const session of (Array.isArray(sessions) ? sessions : [])) {
+    if (!session || (!session.turns && !session.startTime)) continue;
+
+    if (session.turns && session.turns.length > 0) {
+      for (const turn of session.turns) {
+        if (!turn) continue;
+        const turnTime = turn.createdAt ? new Date(turn.createdAt).getTime() : 0;
+        if (Number.isNaN(turnTime) || turnTime <= 0) continue;
+        const tokens = typeof turn.totalTokens === 'number'
+          ? turn.totalTokens
+          : ((turn.inputTokens || 0) + (turn.cachedTokens || 0) + (turn.outputTokens || 0));
+        if (turnTime >= threshold5h) {
+          tokens5h += tokens;
+        }
+        if (turnTime >= threshold7d) {
+          tokens7d += tokens;
+        }
+      }
+    } else if (session.startTime) {
+      const turnTime = new Date(session.startTime).getTime();
+      if (!Number.isNaN(turnTime) && turnTime > 0) {
+        const tokens = session.totalTokens || 0;
+        if (turnTime >= threshold5h) {
+          tokens5h += tokens;
+        }
+        if (turnTime >= threshold7d) {
+          tokens7d += tokens;
+        }
+      }
+    }
+  }
+
+  const used5hPercent = Math.min(100, Math.max(0, (tokens5h / limit5h) * 100));
+  const remain5hPercent = Math.max(0, 100 - used5hPercent);
+  
+  const used7dPercent = Math.min(100, Math.max(0, (tokens7d / limit7d) * 100));
+  const remain7dPercent = Math.max(0, 100 - used7dPercent);
+
+  return {
+    tokens5h,
+    limit5h,
+    used5hPercent,
+    remain5hPercent,
+    tokens7d,
+    limit7d,
+    used7dPercent,
+    remain7dPercent
+  };
+}
+
 module.exports = {
+  bucketSessionsByDate,
   formatLocalDate,
   parseLocalDate,
   createEmptySummary,
@@ -399,5 +495,6 @@ module.exports = {
   getLastNDays,
   getDateRange,
   getSessionDrilldown,
-  getAllTime
+  getAllTime,
+  getRollingUsage
 };

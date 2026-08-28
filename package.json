@@ -1,6 +1,6 @@
 {
   "name": "agy-tools",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Zero-dependency Developer Toolkit & Token/Cost Dashboard for Antigravity CLI and Gemini/Claude LLM workflows",
   "main": "src/index.js",
   "bin": {
@@ -40,7 +40,10 @@
     "bin",
     "src",
     "scripts",
+    "data",
+    "docs",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "README.ko.md"
   ]
 }

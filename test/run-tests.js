@@ -8,6 +8,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const http = require('http');
+const https = require('https');
+const crypto = require('crypto');
 const assert = require('assert');
 
 const config = require('../src/config');
@@ -19,6 +21,7 @@ const aggregator = require('../src/aggregator');
 const formatter = require('../src/formatter');
 const hookHandler = require('../src/hook-handler');
 const priceSyncer = require('../src/price-syncer');
+const geminiQuota = require('../src/gemini-quota');
 const { parseArgs } = require('../src/index');
 
 /**
@@ -449,6 +452,44 @@ async function runAllTests() {
   });
 
   // --- Suite 4: Log Parser & Transcript Processing Unit Tests ---
+  
+  await describe('5. Quota & MiniBar Unit Tests', async () => {
+
+    await test('Should format mini bar correctly', () => {
+      assert.strictEqual(formatter.formatMiniBar(100), '▰▰▰▰▰');
+      assert.strictEqual(formatter.formatMiniBar(50), '▰▰▰▱▱');
+      assert.strictEqual(formatter.formatMiniBar(0), '▱▱▱▱▱');
+      assert.strictEqual(formatter.formatMiniBar(80), '▰▰▰▰▱');
+    });
+
+    await test('Should parse quota config correctly', () => {
+      const parsedConfig = config.loadUserConfig();
+      // Even if not mocked, default quota should exist
+      assert.strictEqual(parsedConfig.quota.limit5h, 20000000);
+      assert.strictEqual(parsedConfig.quota.limit7d, 150000000);
+    });
+
+    await test('Should calculate rolling usage correctly', () => {
+      const now = new Date('2026-08-27T12:00:00Z');
+      const sessions = [{
+        sessionId: 'test',
+        turns: [
+          { createdAt: '2026-08-27T10:00:00Z', inputTokens: 50, cachedTokens: 0, outputTokens: 50 }, // within 5h
+          { createdAt: '2026-08-25T10:00:00Z', inputTokens: 100, cachedTokens: 0, outputTokens: 100 }, // within 7d
+          { createdAt: '2026-08-10T10:00:00Z', inputTokens: 1000, cachedTokens: 0, outputTokens: 1000 } // older
+        ]
+      }];
+      const result = aggregator.getRollingUsage(sessions, now, { limit5h: 1000, limit7d: 1000 });
+      assert.strictEqual(result.tokens5h, 100);
+      assert.strictEqual(result.tokens7d, 300);
+      assert.strictEqual(result.used5hPercent, 10);
+      assert.strictEqual(result.remain5hPercent, 90);
+      assert.strictEqual(result.used7dPercent, 30);
+      assert.strictEqual(result.remain7dPercent, 70);
+    });
+
+  });
+
   await describe('4. Log Parser Unit Tests', async () => {
     const tempDir = path.join(os.tmpdir(), `agy_test_parser_${Date.now()}`);
     fs.mkdirSync(tempDir, { recursive: true });
@@ -2905,6 +2946,84 @@ async function runAllTests() {
     await test('EPIPE on process.stdout is handled and will exit cleanly with code 0', () => {
       assert(process.stdout.listeners('error').length > 0, 'EPIPE handler should be registered on stdout');
     });
+
+    await test('config.loadSettings is exported as alias to loadUserConfig', () => {
+      assert.strictEqual(typeof config.loadSettings, 'function');
+      assert.strictEqual(config.loadSettings, config.loadUserConfig);
+    });
+
+    await test('getRollingUsage computes 5h and 7d rolling windows accurately', () => {
+      const now = new Date('2026-08-29T12:00:00Z');
+      const sessions = [
+        {
+          sessionId: 's1',
+          startTime: '2026-08-29T10:00:00Z',
+          turns: [
+            { createdAt: '2026-08-29T10:00:00Z', totalTokens: 1000 },
+            { createdAt: '2026-08-29T08:00:00Z', totalTokens: 2000 }
+          ]
+        },
+        {
+          sessionId: 's2',
+          startTime: '2026-08-27T10:00:00Z',
+          turns: [
+            { createdAt: '2026-08-27T10:00:00Z', totalTokens: 5000 }
+          ]
+        },
+        {
+          sessionId: 's3',
+          startTime: '2026-08-20T10:00:00Z',
+          turns: [
+            { createdAt: '2026-08-20T10:00:00Z', totalTokens: 10000 }
+          ]
+        }
+      ];
+      const ru = aggregator.getRollingUsage(sessions, now, { limit5h: 10000, limit7d: 100000 });
+      // 5h window: >= 07:00:00Z (s1 turns: 1000 + 2000 = 3000)
+      assert.strictEqual(ru.tokens5h, 3000);
+      assert.strictEqual(ru.limit5h, 10000);
+      assert.strictEqual(ru.used5hPercent, 30);
+      assert.strictEqual(ru.remain5hPercent, 70);
+
+      // 7d window: >= 2026-08-22 (s1 + s2: 3000 + 5000 = 8000; s3 is 9 days ago)
+      assert.strictEqual(ru.tokens7d, 8000);
+      assert.strictEqual(ru.limit7d, 100000);
+      assert.strictEqual(ru.used7dPercent, 8);
+      assert.strictEqual(ru.remain7dPercent, 92);
+    });
+
+    await test('renderRealTimeBadge renders 5h and 7d progress bars and percent', () => {
+      const badgeData = {
+        turnTokens: 500,
+        turnCostUsd: 0.0005,
+        todayTokens: 5000,
+        todayCostUsd: 0.005,
+        cacheHitRate: 80,
+        rollingUsage: {
+          remain5hPercent: 80,
+          remain7dPercent: 50
+        }
+      };
+      const badge = formatter.renderRealTimeBadge(badgeData, 'usd', false, 'DASH_LINK');
+      const q5hLabel = i18n.t('quota5h') || '5h';
+      const q7dLabel = i18n.t('quota7d') || '7d';
+      assert(badge.includes(q5hLabel), `Badge should contain ${q5hLabel}`);
+      assert(badge.includes(q7dLabel), `Badge should contain ${q7dLabel}`);
+      assert(badge.includes('80%'), 'Badge should contain 80%');
+      assert(badge.includes('50%'), 'Badge should contain 50%');
+      assert(badge.includes('DASH_LINK'), 'Badge should contain link');
+    });
+
+    await test('renderDashboardHtml includes quotaWrap DOM element and rollingUsage logic', () => {
+      const { buildDashboardPayload, renderDashboardHtml } = require('../src/html-report');
+      const payload = buildDashboardPayload([], {
+        quota: { limit5h: 50000, limit7d: 500000 }
+      });
+      assert(payload.rollingUsage, 'Payload must include rollingUsage');
+      const html = renderDashboardHtml(payload);
+      assert(html.includes('id="quotaWrap"'), 'HTML must include quotaWrap element');
+      assert(html.includes('renderQuota'), 'HTML must include renderQuota client script');
+    });
   });
 
   // --- Suite 23: Serve Staleness Self-Termination (R1, REQ-101..103, 107) ---
@@ -3106,6 +3225,627 @@ async function runAllTests() {
       assert(serve.STALENESS_WATCHDOG_MS > 0, 'watchdog interval must be positive');
       assert(serve.STALENESS_WATCHDOG_MS <= 60000, 'watchdog interval must be <= 60s per REQ-101/105');
       assert(serveStaleness.MTIME_SAFETY_MARGIN_MS >= 1000, 'mtime safety margin must be >= 1s');
+    });
+  });
+
+  // --- Suite 24: Real-Time 1:1 Gemini Quota Pool & Language Server RPC Integration ---
+  // --- Suite 24: Real-Time 1:1 Gemini Quota Pool & Language Server RPC Integration ---
+  await describe('24. Real-Time 1:1 Gemini Quota Pool & Language Server RPC Integration', async () => {
+    const htmlReport = require('../src/html-report');
+
+    await test('parseCommandLine should extract csrfToken, port, and protocol from arguments (hyphen and underscore variants)', () => {
+      const cmd1 = '"C:\\path\\language_server_windows_x64.exe" --api_url http://127.0.0.1:54321 --csrf_token my-secret-csrf-token --other_flag';
+      const res1 = geminiQuota.parseCommandLine(cmd1);
+      assert.strictEqual(res1.csrfToken, 'my-secret-csrf-token');
+      assert.strictEqual(res1.port, 54321);
+      assert.strictEqual(res1.protocol, 'http');
+
+      const cmd2 = '/usr/bin/language_server --port=8089 --csrf-token=tok_998877';
+      const res2 = geminiQuota.parseCommandLine(cmd2);
+      assert.strictEqual(res2.csrfToken, 'tok_998877');
+      assert.strictEqual(res2.port, 8089);
+      assert.strictEqual(res2.protocol, null);
+
+      const cmd3 = 'language_server --manager-port 7777 --csrf_token auth-abc-123';
+      const res3 = geminiQuota.parseCommandLine(cmd3);
+      assert.strictEqual(res3.csrfToken, 'auth-abc-123');
+      assert.strictEqual(res3.port, 7777);
+      assert.strictEqual(res3.protocol, null);
+
+      const cmd4 = 'language_server --api-url 127.0.0.1:8888 --csrf-token hyphen-tok';
+      const res4 = geminiQuota.parseCommandLine(cmd4);
+      assert.strictEqual(res4.csrfToken, 'hyphen-tok');
+      assert.strictEqual(res4.port, 8888);
+      assert.strictEqual(res4.protocol, null);
+
+      const cmd5 = 'language_server --api_url https://127.0.0.1:54631 --csrf_token sec-token';
+      const res5 = geminiQuota.parseCommandLine(cmd5);
+      assert.strictEqual(res5.csrfToken, 'sec-token');
+      assert.strictEqual(res5.port, 54631);
+      assert.strictEqual(res5.protocol, 'https');
+
+      const cmd6 = 'language_server --api-url=https://localhost:4433 --csrf-token=hyphen-sec';
+      const res6 = geminiQuota.parseCommandLine(cmd6);
+      assert.strictEqual(res6.csrfToken, 'hyphen-sec');
+      assert.strictEqual(res6.port, 4433);
+      assert.strictEqual(res6.protocol, 'https');
+
+      const resEmpty = geminiQuota.parseCommandLine('');
+      assert.strictEqual(resEmpty.csrfToken, null);
+      assert.strictEqual(resEmpty.port, null);
+      assert.strictEqual(resEmpty.protocol, null);
+    });
+
+    await test('extractPortFromNetstat should parse listening port for specific PID', () => {
+      const netstatOutput = [
+        'Active Connections',
+        '  Proto  Local Address          Foreign Address        State           PID',
+        '  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       112',
+        '  TCP    127.0.0.1:54321        0.0.0.0:0              LISTENING       9876',
+        '  TCP    127.0.0.1:4444         127.0.0.1:54321        ESTABLISHED     9876',
+        '  TCP    [::]:8080              [::]:0                 LISTENING       5544'
+      ].join('\n');
+
+      const port = geminiQuota.extractPortFromNetstat(netstatOutput, 9876);
+      assert.strictEqual(port, 54321);
+
+      const portMissing = geminiQuota.extractPortFromNetstat(netstatOutput, 9999);
+      assert.strictEqual(portMissing, null);
+    });
+
+    await test('extractPortFromLsof should parse listening port from lsof output', () => {
+      const lsofOutput = 'language_ 9876 user 5u IPv4 0x123456 0t0 TCP 127.0.0.1:54321 (LISTEN)';
+      const port = geminiQuota.extractPortFromLsof(lsofOutput);
+      assert.strictEqual(port, 54321);
+
+      const lsofEmpty = geminiQuota.extractPortFromLsof('');
+      assert.strictEqual(lsofEmpty, null);
+    });
+
+    await test('formatCountdownDuration and formatResetTime should calculate countdowns accurately', () => {
+      assert.strictEqual(geminiQuota.formatCountdownDuration(45), '45s');
+      assert.strictEqual(geminiQuota.formatCountdownDuration(90), '1m');
+      assert.strictEqual(geminiQuota.formatCountdownDuration(3600), '1h');
+      assert.strictEqual(geminiQuota.formatCountdownDuration(8100), '2h 15m');
+      assert.strictEqual(geminiQuota.formatCountdownDuration(90000), '1d 1h');
+
+      const now = new Date('2026-08-29T06:00:00.000Z');
+      const resetTime = '2026-08-29T08:15:00.000Z'; // 2h 15m later
+      const res = geminiQuota.formatResetTime(resetTime, now);
+      assert.strictEqual(res.resetInSeconds, 8100);
+      assert.strictEqual(res.resetFormatted, '2h 15m');
+
+      const pastReset = geminiQuota.formatResetTime('2026-08-29T05:00:00.000Z', now);
+      assert.strictEqual(pastReset.resetInSeconds, 0);
+      assert.strictEqual(pastReset.resetFormatted, '0s');
+
+      const nullReset = geminiQuota.formatResetTime(null, now);
+      assert.strictEqual(nullReset.resetInSeconds, null);
+      assert.strictEqual(nullReset.resetFormatted, null);
+    });
+
+    await test('extractQuotaFromSummary should parse RetrieveUserQuotaSummary response with 5h and 7d buckets', () => {
+      const refDate = new Date('2026-08-29T00:00:00.000Z');
+      const summaryPayload = {
+        response: {
+          groups: [
+            {
+              displayName: 'Gemini Models',
+              description: 'Models within this group: Gemini Flash, Gemini Pro',
+              buckets: [
+                {
+                  bucketId: 'gemini-weekly',
+                  displayName: 'Weekly Limit Remaining',
+                  window: 'weekly',
+                  remainingFraction: 0.21101993,
+                  resetTime: '2026-09-01T17:57:54Z'
+                },
+                {
+                  bucketId: 'gemini-5h',
+                  displayName: 'Five Hour Limit Remaining',
+                  window: '5h',
+                  remainingFraction: 0.7923148,
+                  resetTime: '2026-08-29T04:10:00Z'
+                }
+              ]
+            },
+            {
+              displayName: 'Claude and GPT models',
+              buckets: [
+                { bucketId: '3p-weekly', window: 'weekly', remainingFraction: 0.26745465, resetTime: '2026-09-01T00:00:00Z' },
+                { bucketId: '3p-5h', window: '5h', remainingFraction: 1.0, resetTime: '2026-08-29T05:00:00Z' }
+              ]
+            }
+          ]
+        }
+      };
+
+      const extracted = geminiQuota.extractQuotaFromSummary(summaryPayload, refDate);
+      assert(extracted !== null, 'Extracted quota should not be null');
+      assert.strictEqual(extracted.isLive, true);
+      assert.strictEqual(extracted.modelLabel, 'Gemini Models');
+
+      // 5h bucket validation
+      assert(extracted.quota5h !== null);
+      assert.strictEqual(extracted.quota5h.remainPercent, 79);
+      assert.strictEqual(extracted.quota5h.remainingFraction, 0.7923148);
+      assert.strictEqual(extracted.quota5h.resetFormatted, '4h 10m');
+      assert.strictEqual(extracted.quota5h.window, '5h');
+
+      // 7d bucket validation
+      assert(extracted.quota7d !== null);
+      assert.strictEqual(extracted.quota7d.remainPercent, 21);
+      assert.strictEqual(extracted.quota7d.remainingFraction, 0.21101993);
+      assert(extracted.quota7d.resetFormatted.includes('d') || extracted.quota7d.resetFormatted.includes('h'));
+      assert.strictEqual(extracted.quota7d.window, 'weekly');
+
+      // Top-level compatibility fields
+      assert.strictEqual(extracted.remainPercent, 79);
+      assert.strictEqual(extracted.remainingFraction, 0.7923148);
+      assert.strictEqual(extracted.resetFormatted, '4h 10m');
+    });
+
+    await test('extractGeminiQuotaFromStatus should extract Gemini pool and discriminate Claude pool (legacy GetUserStatus)', () => {
+      const refDate = new Date('2026-08-29T06:00:00.000Z');
+      const payload = {
+        clientModelConfigs: [
+          {
+            label: 'Claude 3.7 Sonnet',
+            quotaInfo: {
+              remainingFraction: 0.40,
+              resetTime: '2026-08-29T15:00:00.000Z'
+            }
+          },
+          {
+            label: 'Gemini 3.7 Flash Thinking',
+            quotaInfo: {
+              remainingFraction: 0.85,
+              resetTime: '2026-08-29T08:15:00.000Z'
+            }
+          }
+        ]
+      };
+
+      const extracted = geminiQuota.extractGeminiQuotaFromStatus(payload, refDate);
+      assert(extracted !== null, 'Gemini quota should be extracted');
+      assert.strictEqual(extracted.remainPercent, 85);
+      assert.strictEqual(extracted.remainingFraction, 0.85);
+      assert.strictEqual(extracted.resetFormatted, '2h 15m');
+      assert.strictEqual(extracted.resetInSeconds, 8100);
+      assert.strictEqual(extracted.modelLabel, 'Gemini 3.7 Flash Thinking');
+      assert.strictEqual(extracted.isLive, true);
+      assert.strictEqual(extracted.source, 'language_server');
+      assert(extracted.quota5h !== null);
+      assert.strictEqual(extracted.quota5h.remainPercent, 85);
+
+      // Test snake_case fallback and nested userStatus
+      const payloadSnake = {
+        userStatus: {
+          clientModelConfigs: [
+            {
+              model: 'gemini-2.5-pro',
+              quota_info: {
+                remaining_fraction: 0.62,
+                reset_time: '2026-08-29T07:00:00.000Z'
+              }
+            }
+          ]
+        }
+      };
+      const extractedSnake = geminiQuota.extractGeminiQuotaFromStatus(payloadSnake, refDate);
+      assert(extractedSnake !== null);
+      assert.strictEqual(extractedSnake.remainPercent, 62);
+      assert.strictEqual(extractedSnake.resetFormatted, '1h');
+
+      // Empty or invalid payload
+      assert.strictEqual(geminiQuota.extractGeminiQuotaFromStatus({}), null);
+      assert.strictEqual(geminiQuota.extractGeminiQuotaFromStatus(null), null);
+      assert.strictEqual(geminiQuota.extractGeminiQuotaFromStatus({ clientModelConfigs: [] }), null);
+    });
+
+    await test('saveCachedGeminiQuota and getCachedGeminiQuota should persist and honor 30s TTL with 5h/7d countdowns', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-quota-test-'));
+      const testCacheFile = path.join(tempDir, 'gemini_quota_cache.json');
+
+      const quotaData = {
+        remainPercent: 79,
+        remainingFraction: 0.79,
+        resetTime: new Date(Date.now() + 7200000).toISOString(),
+        resetFormatted: '2h',
+        resetInSeconds: 7200,
+        quota5h: {
+          remainPercent: 79,
+          remainingFraction: 0.79,
+          resetTime: new Date(Date.now() + 7200000).toISOString(),
+          resetFormatted: '2h',
+          resetInSeconds: 7200,
+          window: '5h'
+        },
+        quota7d: {
+          remainPercent: 21,
+          remainingFraction: 0.21,
+          resetTime: new Date(Date.now() + 86400000 * 3).toISOString(),
+          resetFormatted: '3d',
+          resetInSeconds: 86400 * 3,
+          window: 'weekly'
+        },
+        modelLabel: 'Gemini Models',
+        isLive: true,
+        source: 'language_server'
+      };
+
+      const saved = geminiQuota.saveCachedGeminiQuota(quotaData, testCacheFile);
+      assert(saved !== null);
+      assert.strictEqual(saved.remainPercent, 79);
+      assert.strictEqual(saved.quota5h.remainPercent, 79);
+      assert.strictEqual(saved.quota7d.remainPercent, 21);
+      assert(fs.existsSync(testCacheFile));
+
+      // Immediate read (Fresh)
+      const readFresh = geminiQuota.getCachedGeminiQuota(testCacheFile, 30000);
+      assert(readFresh !== null);
+      assert.strictEqual(readFresh.remainPercent, 79);
+      assert.strictEqual(readFresh.quota5h.remainPercent, 79);
+      assert.strictEqual(readFresh.quota7d.remainPercent, 21);
+      assert.strictEqual(readFresh.isFresh, true);
+      assert(readFresh.quota5h.resetFormatted.includes('h') || readFresh.quota5h.resetFormatted.includes('m'));
+      assert(readFresh.quota7d.resetFormatted.includes('d') || readFresh.quota7d.resetFormatted.includes('h'));
+
+      // Stale read (Simulate expired timestamp)
+      const staleContent = JSON.parse(fs.readFileSync(testCacheFile, 'utf8'));
+      staleContent.timestampMs = Date.now() - 35000; // 35s ago (> 30s TTL)
+      fs.writeFileSync(testCacheFile, JSON.stringify(staleContent, null, 2), 'utf8');
+
+      const readStale = geminiQuota.getCachedGeminiQuota(testCacheFile, 30000);
+      assert(readStale !== null);
+      assert.strictEqual(readStale.isFresh, false);
+
+      // Non-existent cache
+      assert.strictEqual(geminiQuota.getCachedGeminiQuota(path.join(tempDir, 'missing.json')), null);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    // Self-signed certificate helper for ephemeral HTTPS mock servers
+    function createTestCert() {
+      const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        publicKeyEncoding: { type: 'pkcs1', format: 'der' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+      });
+      const encodeLen = len => len < 128 ? Buffer.from([len]) : Buffer.concat([Buffer.from([0x80 | (len > 255 ? 2 : 1)]), len > 255 ? Buffer.from([len >> 8, len & 0xff]) : Buffer.from([len])]);
+      const encodeTag = (tag, data) => Buffer.concat([Buffer.from([tag]), encodeLen(data.length), data]);
+      const encodeSeq = items => encodeTag(0x30, Buffer.concat(items));
+      const encodeOid = oidStr => {
+        const p = oidStr.split('.').map(Number);
+        const b = [p[0] * 40 + p[1]];
+        for (let i = 2; i < p.length; i++) {
+          let v = p[i], o = [];
+          o.push(v & 0x7f);
+          while ((v >>= 7) > 0) o.unshift(0x80 | (v & 0x7f));
+          b.push(...o);
+        }
+        return encodeTag(0x06, Buffer.from(b));
+      };
+      const sigAlg = encodeSeq([encodeOid('1.2.840.113549.1.1.11'), Buffer.from([0x05, 0x00])]);
+      const pubInfo = encodeSeq([encodeSeq([encodeOid('1.2.840.113549.1.1.1'), Buffer.from([0x05, 0x00])]), encodeTag(0x03, Buffer.concat([Buffer.from([0x00]), publicKey]))]);
+      const name = encodeSeq([encodeTag(0x31, encodeSeq([encodeOid('2.5.4.3'), encodeTag(0x0c, Buffer.from('localhost', 'utf8'))]))]);
+      const validity = encodeSeq([encodeTag(0x17, Buffer.from('250101000000Z', 'ascii')), encodeTag(0x17, Buffer.from('350101000000Z', 'ascii'))]);
+      const tbs = encodeSeq([encodeTag(0x02, Buffer.from([0x01])), sigAlg, name, validity, name, pubInfo]);
+      const signer = crypto.createSign('sha256');
+      signer.update(tbs);
+      const sig = signer.sign(privateKey);
+      const certDer = encodeSeq([tbs, sigAlg, encodeTag(0x03, Buffer.concat([Buffer.from([0x00]), sig]))]);
+      const certPem = `-----BEGIN CERTIFICATE-----\n${certDer.toString('base64').match(/.{1,64}/g).join('\n')}\n-----END CERTIFICATE-----\n`;
+      return { certPem, privateKey };
+    }
+
+    await test('makeRpcRequest and RPC helpers should support HTTPS with self-signed certificate tolerance (rejectUnauthorized: false)', async () => {
+      const { certPem, privateKey } = createTestCert();
+      let lastHeaders = null;
+      let lastPath = null;
+
+      const httpsServer = https.createServer({ key: privateKey, cert: certPem }, (req, res) => {
+        lastHeaders = req.headers;
+        lastPath = req.url;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          response: {
+            groups: [
+              {
+                displayName: 'Gemini Models',
+                buckets: [
+                  {
+                    bucketId: 'gemini-5h',
+                    window: '5h',
+                    remainingFraction: 0.92,
+                    resetTime: new Date(Date.now() + 18000000).toISOString()
+                  }
+                ]
+              }
+            ]
+          }
+        }));
+      });
+
+      await new Promise(r => httpsServer.listen(0, '127.0.0.1', r));
+      const port = httpsServer.address().port;
+
+      // 1. Test makeRpcRequest directly over HTTPS
+      const rpcRes = await geminiQuota.makeRpcRequest({
+        path: '/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary',
+        port,
+        csrfToken: 'test-https-csrf',
+        protocol: 'https',
+        rejectUnauthorized: false
+      });
+      assert(rpcRes.response !== undefined);
+      assert.strictEqual(lastHeaders['x-codeium-csrf-token'], 'test-https-csrf');
+      assert.strictEqual(lastHeaders['connect-protocol-version'], '1');
+      assert.strictEqual(lastPath, '/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary');
+
+      // 2. Test callRetrieveUserQuotaSummary with protocol 'https'
+      const summaryRes = await geminiQuota.callRetrieveUserQuotaSummary({
+        port,
+        csrfToken: 'summary-https-csrf',
+        protocol: 'https',
+        rejectUnauthorized: false
+      });
+      assert(summaryRes.response !== undefined);
+      assert.strictEqual(lastHeaders['x-codeium-csrf-token'], 'summary-https-csrf');
+
+      // 3. Test callGetUserStatus with protocol 'https'
+      const statusRes = await geminiQuota.callGetUserStatus({
+        port,
+        csrfToken: 'status-https-csrf',
+        protocol: 'https',
+        rejectUnauthorized: false
+      });
+      assert(statusRes.response !== undefined);
+      assert.strictEqual(lastHeaders['x-codeium-csrf-token'], 'status-https-csrf');
+
+      await new Promise(r => httpsServer.close(r));
+    });
+
+    await test('fetchLiveGeminiQuota should support HTTPS Language Server endpoints without TLS handshake errors and adaptively fallback to HTTP', async () => {
+      const { certPem, privateKey } = createTestCert();
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-quota-https-'));
+      const testCacheFile = path.join(tempDir, 'quota_cache_https.json');
+
+      let receivedHttpsCsrf = null;
+      const httpsServer = https.createServer({ key: privateKey, cert: certPem }, (req, res) => {
+        receivedHttpsCsrf = req.headers['x-codeium-csrf-token'];
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          response: {
+            groups: [
+              {
+                displayName: 'Gemini Models',
+                buckets: [
+                  {
+                    bucketId: 'gemini-5h',
+                    window: '5h',
+                    remainingFraction: 0.85,
+                    resetTime: new Date(Date.now() + 10000000).toISOString()
+                  },
+                  {
+                    bucketId: 'gemini-weekly',
+                    window: 'weekly',
+                    remainingFraction: 0.45,
+                    resetTime: new Date(Date.now() + 86400000 * 2).toISOString()
+                  }
+                ]
+              }
+            ]
+          }
+        }));
+      });
+
+      await new Promise(r => httpsServer.listen(0, '127.0.0.1', r));
+      const httpsPort = httpsServer.address().port;
+
+      // Query HTTPS server (default probes HTTPS first)
+      const liveHttpsRes = await geminiQuota.fetchLiveGeminiQuota({
+        port: httpsPort,
+        csrfToken: 'live-https-token',
+        cachePath: testCacheFile
+      });
+
+      assert.strictEqual(receivedHttpsCsrf, 'live-https-token');
+      assert.strictEqual(liveHttpsRes.isLive, true);
+      assert.strictEqual(liveHttpsRes.remainPercent, 85);
+      assert.strictEqual(liveHttpsRes.quota5h.remainPercent, 85);
+      assert.strictEqual(liveHttpsRes.quota7d.remainPercent, 45);
+
+      await new Promise(r => httpsServer.close(r));
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('fetchLiveGeminiQuota should query RetrieveUserQuotaSummary and fallback gracefully when offline', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-quota-rpc-'));
+      const testCacheFile = path.join(tempDir, 'quota_cache.json');
+
+      // 1. Live RPC test with ephemeral mock server returning RetrieveUserQuotaSummary schema
+      let receivedCsrf = null;
+      let receivedPath = null;
+
+      const mockServer = http.createServer((req, res) => {
+        receivedCsrf = req.headers['x-codeium-csrf-token'];
+        receivedPath = req.url;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          response: {
+            groups: [
+              {
+                displayName: 'Gemini Models',
+                buckets: [
+                  {
+                    bucketId: 'gemini-weekly',
+                    window: 'weekly',
+                    remainingFraction: 0.211,
+                    resetTime: new Date(Date.now() + 86400000 * 3).toISOString()
+                  },
+                  {
+                    bucketId: 'gemini-5h',
+                    window: '5h',
+                    remainingFraction: 0.792,
+                    resetTime: new Date(Date.now() + 15000000).toISOString()
+                  }
+                ]
+              }
+            ]
+          }
+        }));
+      });
+
+      await new Promise((resolve) => mockServer.listen(0, '127.0.0.1', resolve));
+      const boundPort = mockServer.address().port;
+
+      const liveRes = await geminiQuota.fetchLiveGeminiQuota({
+        port: boundPort,
+        csrfToken: 'test-csrf-token-123',
+        cachePath: testCacheFile
+      });
+
+      assert.strictEqual(receivedCsrf, 'test-csrf-token-123');
+      assert.strictEqual(receivedPath, '/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary');
+      assert.strictEqual(liveRes.isLive, true);
+      assert.strictEqual(liveRes.remainPercent, 79);
+      assert.strictEqual(liveRes.quota5h.remainPercent, 79);
+      assert.strictEqual(liveRes.quota7d.remainPercent, 21);
+
+      await new Promise((resolve) => mockServer.close(resolve));
+
+      // 2. Offline fallback test
+      const offlineRes = await geminiQuota.fetchLiveGeminiQuota({
+        port: 59999, // Unused closed port
+        csrfToken: 'any-token',
+        cachePath: testCacheFile
+      });
+
+      assert.strictEqual(offlineRes.isLive, false);
+      assert.strictEqual(offlineRes.remainPercent, null);
+      assert.strictEqual(offlineRes.source, 'fallback');
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('hookHandler and formatter should render both Gemini 5h and 7d live quotas and fallback to rolling usage', async () => {
+      const i18n = require('../src/i18n');
+      i18n.setLocale('ko');
+
+      const liveQuota = {
+        remainPercent: 79,
+        remainingFraction: 0.792,
+        resetFormatted: '4h 10m',
+        resetInSeconds: 15000,
+        quota5h: {
+          remainPercent: 79,
+          remainingFraction: 0.792,
+          resetFormatted: '4h 10m',
+          resetInSeconds: 15000,
+          window: '5h'
+        },
+        quota7d: {
+          remainPercent: 21,
+          remainingFraction: 0.211,
+          resetFormatted: '3d 20h',
+          resetInSeconds: 331200,
+          window: 'weekly'
+        },
+        isLive: true,
+        source: 'language_server'
+      };
+
+      const badgeStr = formatter.renderRealTimeBadge({
+        turnTokens: 1500,
+        turnCostUsd: 0.001,
+        todayTokens: 25000,
+        todayCostUsd: 0.02,
+        cacheHitRate: 80,
+        isFree: false,
+        geminiQuota: liveQuota
+      }, 'usd', false);
+
+      assert(badgeStr.includes('5h:'), `Badge must include '5h:', got: ${badgeStr}`);
+      assert(!badgeStr.includes('Gemini 5h:'), `Badge must not include 'Gemini 5h:', got: ${badgeStr}`);
+      assert(badgeStr.includes('79%'), 'Badge must include 79% for 5h quota');
+      assert(badgeStr.includes('4h 10m'), 'Badge must include 4h 10m countdown');
+      assert(badgeStr.includes('7d:'), `Badge must include '7d:', got: ${badgeStr}`);
+      assert(badgeStr.includes('21%'), 'Badge must include 21% for 7d quota');
+      assert(badgeStr.includes('3d 20h'), 'Badge must include 3d 20h countdown');
+
+      // Fallback rendering when geminiQuota is null
+      const fallbackBadge = formatter.renderRealTimeBadge({
+        turnTokens: 1500,
+        turnCostUsd: 0.001,
+        todayTokens: 25000,
+        todayCostUsd: 0.02,
+        cacheHitRate: 80,
+        isFree: false,
+        geminiQuota: null,
+        rollingUsage: {
+          remain5hPercent: 95,
+          remain7dPercent: 90,
+          tokens5h: 1000,
+          limit5h: 20000000,
+          tokens7d: 5000,
+          limit7d: 150000000
+        }
+      }, 'usd', false);
+
+      assert(fallbackBadge.includes('5시간') || fallbackBadge.includes('5h'), 'Fallback badge must include rolling usage');
+      assert(fallbackBadge.includes('95%'), 'Fallback badge must include 5h percent');
+    });
+
+    await test('htmlReport payload and client script should include Gemini 5h and 7d quota live cards and indicator', () => {
+      const payload = htmlReport.buildDashboardPayload([], {
+        currency: 'usd',
+        lang: 'ko',
+        geminiQuota: {
+          remainPercent: 79,
+          resetFormatted: '4h 10m',
+          quota5h: {
+            remainPercent: 79,
+            resetFormatted: '4h 10m',
+            window: '5h'
+          },
+          quota7d: {
+            remainPercent: 21,
+            resetFormatted: '3d 20h',
+            window: 'weekly'
+          },
+          isLive: true,
+          source: 'language_server'
+        }
+      });
+
+      assert(payload.geminiQuota !== undefined);
+      assert.strictEqual(payload.geminiQuota.remainPercent, 79);
+      assert.strictEqual(payload.geminiQuota.isLive, true);
+      assert.strictEqual(payload.geminiQuota.quota5h.remainPercent, 79);
+      assert.strictEqual(payload.geminiQuota.quota7d.remainPercent, 21);
+
+      const html = htmlReport.renderDashboardHtml(payload, { refreshSec: 5, servePort: 8787 });
+      assert(html.includes('renderQuota(r, gq)'), 'renderQuota must accept (r, gq)');
+      assert(html.includes('quota5h'), 'HTML must reference quota5h');
+      assert(html.includes('quota7d'), 'HTML must reference quota7d');
+      assert(html.includes('quotaLive'), 'HTML must include quotaLive indicator');
+      assert(html.includes('quotaFallback'), 'HTML must include quotaFallback indicator');
+    });
+
+    await test('parseArgs and renderHelp should support --sync-quota flag', () => {
+      const opts1 = parseArgs(['node', 'bin/agy-tokens.js', '--sync-quota']);
+      assert.strictEqual(opts1.syncQuota, true);
+
+      const opts2 = parseArgs(['node', 'bin/agy-tokens.js', 'sync-quota']);
+      assert.strictEqual(opts2.syncQuota, true);
+
+      const opts3 = parseArgs(['node', 'bin/agy-tokens.js', '--quota']);
+      assert.strictEqual(opts3.syncQuota, true);
+
+      const helpText = formatter.renderHelp();
+      assert(helpText.includes('--sync-quota'), 'Help screen must document --sync-quota');
     });
   });
 

@@ -609,6 +609,18 @@ function renderSessionTable(session, currencyCode, isFree = false) {
 }
 
 /**
+ * Formats a mini progress bar using block characters.
+ * @param {number} percent 0-100
+ * @param {number} [length=5] Length of the bar
+ * @returns {string}
+ */
+function formatMiniBar(percent, length = 5) {
+  const filled = Math.round((percent / 100) * length);
+  const clamped = Math.max(0, Math.min(length, filled));
+  return '▰'.repeat(clamped) + '▱'.repeat(length - clamped);
+}
+
+/**
  * Generates a 1-line real-time status badge string for PostInvocation hooks.
  * @param {object} badgeData - Turn & daily metrics.
  * @param {string} [currencyCode='usd'] - Currency code.
@@ -633,6 +645,44 @@ function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, li
     `${t('hookBadgeTurn')}: ${styleText(turnTok, 'white')} (${styleText(turnCost, 'green')}) | ` +
     `${t('hookBadgeToday')}: ${styleText(todayTok, 'brightYellow')} (${styleText(todayCost, 'brightGreen')}) | ` +
     `${t('hookBadgeCache')}: ${styleText(cacheHit, 'cyan')}`;
+
+  if (badgeData.geminiQuota && badgeData.geminiQuota.remainPercent !== null && badgeData.geminiQuota.remainPercent !== undefined) {
+    const gq = badgeData.geminiQuota;
+    if (gq.quota5h || gq.quota7d) {
+      const parts = [];
+      if (gq.quota5h && gq.quota5h.remainPercent !== null && gq.quota5h.remainPercent !== undefined) {
+        const pct5 = Math.max(0, Math.min(100, Math.round(Number(gq.quota5h.remainPercent) || 0)));
+        const bar5 = formatMiniBar(pct5, 5);
+        const resetPart5 = gq.quota5h.resetFormatted ? ` (${gq.quota5h.resetFormatted})` : '';
+        parts.push(`5h: ${styleText(bar5, 'brightCyan')} ${pct5}%${resetPart5}`);
+      }
+      if (gq.quota7d && gq.quota7d.remainPercent !== null && gq.quota7d.remainPercent !== undefined) {
+        const pct7 = Math.max(0, Math.min(100, Math.round(Number(gq.quota7d.remainPercent) || 0)));
+        const bar7 = formatMiniBar(pct7, 5);
+        const resetPart7 = gq.quota7d.resetFormatted ? ` (${gq.quota7d.resetFormatted})` : '';
+        parts.push(`7d: ${styleText(bar7, 'brightCyan')} ${pct7}%${resetPart7}`);
+      }
+      if (parts.length > 0) {
+        badge += ` | ${parts.join(' | ')}`;
+      }
+    } else {
+      const gPct = Math.max(0, Math.min(100, Math.round(Number(gq.remainPercent) || 0)));
+      const bar = formatMiniBar(gPct, 5);
+      const resetWord = t('quotaReset') || '리셋';
+      const resetPart = gq.resetFormatted ? ` (${resetWord} ${gq.resetFormatted})` : '';
+      const gqSegment = `${t('quota5h') || '5h'}: ${styleText(bar, 'brightCyan')} ${gPct}%${resetPart}`;
+      badge += ` | ${gqSegment}`;
+    }
+  } else if (badgeData.rollingUsage) {
+    const ru = badgeData.rollingUsage;
+    const r5h = Number.isFinite(ru.remain5hPercent) ? ru.remain5hPercent : 100;
+    const r7d = Number.isFinite(ru.remain7dPercent) ? ru.remain7dPercent : 100;
+    const bar5 = formatMiniBar(r5h, 5);
+    const bar7 = formatMiniBar(r7d, 5);
+    const q5h = `${t('quota5h') || '5h'}: ${styleText(bar5, 'cyan')} ${Math.round(r5h)}%`;
+    const q7d = `${t('quota7d') || '7d'}: ${styleText(bar7, 'cyan')} ${Math.round(r7d)}%`;
+    badge += ` | ${q5h} | ${q7d}`;
+  }
 
   if (link) {
     badge += ` | ${link}`;
@@ -667,6 +717,7 @@ function renderHelp() {
     ['--fresh, --no-cache', t('cliOptFresh')],
     ['--prices, --models', t('cliOptPrices')],
     ['--sync, --sync-prices', t('cliOptSync')],
+    ['--sync-quota', t('cliOptSyncQuota')],
     ['--auto-sync', t('cliOptAutoSync')],
     ['--html, --dashboard', t('cliOptHtml')],
     ['--serve [port]', t('cliOptServe')],
@@ -716,6 +767,7 @@ module.exports = {
   formatCompact,
   formatCurrency,
   renderProgressBar,
+  formatMiniBar,
   renderBanner,
   renderSummaryMetrics,
   renderDailyTable,

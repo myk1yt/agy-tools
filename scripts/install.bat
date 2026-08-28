@@ -39,7 +39,7 @@ echo   (merge into the existing JSON object, then restart agy):
 echo.
 echo   "statusLine": {
 echo     "type": "command",
-echo     "command": "C:\PROGRA~1\nodejs\node.exe C:\Users\k1yt\AppData\Roaming\npm\NODE_M~1\AGY-TO~1\bin\AGY-TO~1.JS --hook --raw --write-dashboard",
+echo     "command": "C:\PROGRA~1\nodejs\node.exe %APPDATA%\npm\NODE_M~1\AGY-TO~1\bin\AGY-TO~1.JS --hook --raw --write-dashboard",
 echo     "enabled": true,
 echo     "stack_with_default": true
 echo   }

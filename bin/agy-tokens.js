@@ -6,6 +6,12 @@
 
 const { runCli } = require('../src/index');
 
+process.stdout.on('error', (err) => {
+  if (err.code === 'EPIPE' || err.code === 'EOF' || err.syscall === 'write') {
+    process.exit(0);
+  }
+});
+
 const isHookMode = process.argv.includes('--hook') || process.argv.includes('--badge');
 
 runCli().catch(err => {

@@ -7,6 +7,8 @@ yarn-error.log*
 # Test and coverage
 coverage/
 .nyc_output/
+test-cache-*.json
+test/test-cache-*.json
 
 # Cache and local databases
 .gemini/

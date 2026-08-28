@@ -23,6 +23,8 @@ const USER_CONFIG_FILE = path.join(GEMINI_DIR, 'antigravity_tokens.json');
 const USER_PRICING_FILE = path.join(GEMINI_DIR, 'pricing.json');
 const ALT_PRICING_FILE = path.join(ANTIGRAVITY_DIR, 'pricing.json');
 const REMOTE_PRICING_CACHE_FILE = path.join(GEMINI_DIR, 'antigravity_pricing.json');
+const GEMINI_QUOTA_CACHE_FILE = path.join(GEMINI_DIR, 'gemini_quota_cache.json');
+const GEMINI_QUOTA_CACHE_TTL_MS = 30000;
 const BUNDLED_PRICING_FILE = path.join(__dirname, '..', 'data', 'pricing.json');
 
 /**
@@ -45,6 +47,9 @@ const FLASH_PATTERN = /(?:^|[^a-z0-9])(flash|lite|mini|haiku|fast|small|turbo|lo
 const PRO_PATTERN = /(?:^|[^a-z0-9])(pro|ultra|opus|sonnet|large|max|high)(?:[^a-z0-9]|$)/i;
 const FREE_PATTERN = /(?:^|[^a-z0-9])(free|flat|zero|local|ollama)(?:[^a-z0-9]|$)/i;
 
+const DEFAULT_QUOTA_5H = 20000000;
+const DEFAULT_QUOTA_7D = 150000000;
+
 /**
  * Baseline model pricing catalog (prices in USD per 1,000,000 tokens).
  * Covering all Google Gemini, Anthropic Claude, and OpenAI models in Antigravity CLI (/model).
@@ -55,47 +60,20 @@ const MODEL_PRICING = {
     provider: 'google',
     displayName: 'Gemini 3.7 Flash',
     contextWindow: '1M',
-    inputPerMillion: 0.15,
-    cachedInputPerMillion: 0.0375,
-    outputPerMillion: 0.60,
-    aliases: [
-      'gemini-3.7-flash',
-      'gemini 3.7 flash',
-      'gemini 3.7 flash (high)',
-      'gemini 3.7 flash (low)',
-      'gemini-3.7-flash-high',
-      'gemini-3.7-flash-low'
-    ]
+    inputPerMillion: 0.05,
+    cachedInputPerMillion: 0.0125,
+    outputPerMillion: 0.20,
+    aliases: ['gemini-3.7-flash', 'gemini 3.7 flash', 'gemini-3-7-flash']
   },
   'gemini-3.7-flash-thinking': {
     id: 'gemini-3.7-flash-thinking',
     provider: 'google',
-    displayName: 'Gemini 3.7 Flash (Thinking)',
+    displayName: 'Gemini 3.7 Flash Thinking',
     contextWindow: '1M',
     inputPerMillion: 0.15,
     cachedInputPerMillion: 0.0375,
     outputPerMillion: 0.60,
-    aliases: [
-      'gemini-3.7-flash-thinking',
-      'gemini 3.7 flash thinking',
-      'gemini-3.7-flash-thinking-exp',
-      'gemini-3.7-thinking',
-      'gemini 3.7 thinking'
-    ]
-  },
-  'gemini-2.5-flash': {
-    id: 'gemini-2.5-flash',
-    provider: 'google',
-    displayName: 'Gemini 2.5 Flash',
-    contextWindow: '1M',
-    inputPerMillion: 0.15,
-    cachedInputPerMillion: 0.0375,
-    outputPerMillion: 0.60,
-    aliases: [
-      'gemini-2.5-flash',
-      'gemini 2.5 flash',
-      'gemini-flash'
-    ]
+    aliases: ['gemini-3.7-flash-thinking', 'gemini 3.7 flash thinking']
   },
   'gemini-2.5-pro': {
     id: 'gemini-2.5-pro',
@@ -105,14 +83,17 @@ const MODEL_PRICING = {
     inputPerMillion: 1.25,
     cachedInputPerMillion: 0.3125,
     outputPerMillion: 5.00,
-    notes: '>128k prompt rate: $2.50 / $10.00',
-    aliases: [
-      'gemini-2.5-pro',
-      'gemini 2.5 pro',
-      'gemini-3-pro',
-      'gemini 3 pro',
-      'gemini-pro'
-    ]
+    aliases: ['gemini-2.5-pro', 'gemini 2.5 pro']
+  },
+  'gemini-2.5-flash': {
+    id: 'gemini-2.5-flash',
+    provider: 'google',
+    displayName: 'Gemini 2.5 Flash',
+    contextWindow: '1M',
+    inputPerMillion: 0.075,
+    cachedInputPerMillion: 0.01875,
+    outputPerMillion: 0.30,
+    aliases: ['gemini-2.5-flash', 'gemini 2.5 flash']
   },
   'gemini-2.0-flash': {
     id: 'gemini-2.0-flash',
@@ -122,25 +103,7 @@ const MODEL_PRICING = {
     inputPerMillion: 0.10,
     cachedInputPerMillion: 0.025,
     outputPerMillion: 0.40,
-    aliases: [
-      'gemini-2.0-flash',
-      'gemini 2.0 flash',
-      'gemini-2-flash'
-    ]
-  },
-  'gemini-2.0-flash-lite': {
-    id: 'gemini-2.0-flash-lite',
-    provider: 'google',
-    displayName: 'Gemini 2.0 Flash Lite',
-    contextWindow: '1M',
-    inputPerMillion: 0.075,
-    cachedInputPerMillion: 0.01875,
-    outputPerMillion: 0.30,
-    aliases: [
-      'gemini-2.0-flash-lite',
-      'gemini 2.0 flash lite',
-      'gemini-2-flash-lite'
-    ]
+    aliases: ['gemini-2.0-flash', 'gemini 2.0 flash']
   },
   'claude-3.7-sonnet': {
     id: 'claude-3.7-sonnet',
@@ -150,13 +113,7 @@ const MODEL_PRICING = {
     inputPerMillion: 3.00,
     cachedInputPerMillion: 0.30,
     outputPerMillion: 15.00,
-    aliases: [
-      'claude-3.7-sonnet',
-      'claude 3.7 sonnet',
-      'claude-3-7-sonnet',
-      'claude-3.7-sonnet-thinking',
-      'claude-3.7-sonnet (thinking)'
-    ]
+    aliases: ['claude-3.7-sonnet', 'claude 3.7 sonnet']
   },
   'claude-3.5-sonnet': {
     id: 'claude-3.5-sonnet',
@@ -166,12 +123,7 @@ const MODEL_PRICING = {
     inputPerMillion: 3.00,
     cachedInputPerMillion: 0.30,
     outputPerMillion: 15.00,
-    aliases: [
-      'claude-3.5-sonnet',
-      'claude 3.5 sonnet',
-      'claude-3-5-sonnet',
-      'sonnet'
-    ]
+    aliases: ['claude-3.5-sonnet', 'claude 3.5 sonnet', 'sonnet']
   },
   'claude-3.5-haiku': {
     id: 'claude-3.5-haiku',
@@ -181,27 +133,7 @@ const MODEL_PRICING = {
     inputPerMillion: 0.80,
     cachedInputPerMillion: 0.08,
     outputPerMillion: 4.00,
-    aliases: [
-      'claude-3.5-haiku',
-      'claude 3.5 haiku',
-      'claude-3-5-haiku',
-      'haiku'
-    ]
-  },
-  'claude-3-opus': {
-    id: 'claude-3-opus',
-    provider: 'anthropic',
-    displayName: 'Claude 3 Opus',
-    contextWindow: '200k',
-    inputPerMillion: 15.00,
-    cachedInputPerMillion: 1.50,
-    outputPerMillion: 75.00,
-    aliases: [
-      'claude-3-opus',
-      'claude 3 opus',
-      'claude-3-opus-20240229',
-      'opus'
-    ]
+    aliases: ['claude-3.5-haiku', 'claude 3.5 haiku', 'haiku']
   },
   'gpt-4o': {
     id: 'gpt-4o',
@@ -211,26 +143,7 @@ const MODEL_PRICING = {
     inputPerMillion: 2.50,
     cachedInputPerMillion: 1.25,
     outputPerMillion: 10.00,
-    aliases: [
-      'gpt-4o',
-      'gpt 4o',
-      'gpt-4o-2024-11-20',
-      'gpt-4o-latest'
-    ]
-  },
-  'gpt-4o-mini': {
-    id: 'gpt-4o-mini',
-    provider: 'openai',
-    displayName: 'GPT-4o mini',
-    contextWindow: '128k',
-    inputPerMillion: 0.15,
-    cachedInputPerMillion: 0.075,
-    outputPerMillion: 0.60,
-    aliases: [
-      'gpt-4o-mini',
-      'gpt 4o mini',
-      'gpt-4o-mini-2024-07-18'
-    ]
+    aliases: ['gpt-4o', 'gpt 4o']
   },
   'o3-mini': {
     id: 'o3-mini',
@@ -240,13 +153,7 @@ const MODEL_PRICING = {
     inputPerMillion: 1.10,
     cachedInputPerMillion: 0.55,
     outputPerMillion: 4.40,
-    aliases: [
-      'o3-mini',
-      'o3 mini',
-      'o3-mini-high',
-      'o3-mini-medium',
-      'o3-mini-low'
-    ]
+    aliases: ['o3-mini', 'o3 mini']
   },
   'o1': {
     id: 'o1',
@@ -256,20 +163,16 @@ const MODEL_PRICING = {
     inputPerMillion: 15.00,
     cachedInputPerMillion: 7.50,
     outputPerMillion: 60.00,
-    aliases: [
-      'o1',
-      'o1-preview',
-      'o1-full'
-    ]
+    aliases: ['o1', 'o1-preview']
   },
   'default': {
     id: 'default',
     provider: 'google',
     displayName: 'Gemini 3.7 Flash (Default)',
     contextWindow: '1M',
-    inputPerMillion: 0.15,
-    cachedInputPerMillion: 0.0375,
-    outputPerMillion: 0.60,
+    inputPerMillion: 0.05,
+    cachedInputPerMillion: 0.0125,
+    outputPerMillion: 0.20,
     aliases: ['default']
   }
 };
@@ -430,6 +333,9 @@ function smartHeuristicPricing(modelName) {
   };
 }
 
+let _cachedActiveModel = null;
+let _cachedActiveModelMtime = 0;
+
 /**
  * Reads the active model name configured in Antigravity settings.json.
  * @returns {string} The active model name or a default fallback.
@@ -437,16 +343,22 @@ function smartHeuristicPricing(modelName) {
 function getActiveModelFromSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
+      const stat = fs.statSync(SETTINGS_FILE);
+      if (_cachedActiveModel && stat.mtimeMs === _cachedActiveModelMtime) {
+        return _cachedActiveModel;
+      }
       const content = fs.readFileSync(SETTINGS_FILE, 'utf8');
       const settings = JSON.parse(content);
       if (settings && typeof settings.model === 'string' && settings.model.trim()) {
-        return settings.model.trim();
+        _cachedActiveModel = settings.model.trim();
+        _cachedActiveModelMtime = stat.mtimeMs;
+        return _cachedActiveModel;
       }
     }
   } catch (_err) {
     // Gracefully ignore file read or parse error
   }
-  return 'Gemini 3.7 Flash (High)';
+  return _cachedActiveModel || 'gemini-3.7-flash';
 }
 
 /**
@@ -473,14 +385,19 @@ function getBaseModelName(modelName) {
  * @returns {object} Pricing configuration for the matched model.
  */
 function getModelPricing(modelName) {
-  loadUserConfig();
-
   const rawTarget = getBaseModelName(modelName || getActiveModelFromSettings());
   const target = (rawTarget || '').toLowerCase().trim();
 
   // 1. Exact key match in MODEL_PRICING
   if (MODEL_PRICING[target]) {
     return MODEL_PRICING[target];
+  }
+
+  // 1b. Direct alias match in MODEL_PRICING definitions
+  for (const def of Object.values(MODEL_PRICING)) {
+    if (def && Array.isArray(def.aliases) && def.aliases.some(a => (typeof a === 'string' && a.toLowerCase().trim() === target))) {
+      return def;
+    }
   }
 
   // 2. Exact or substring match against known model aliases (longest alias wins)
@@ -558,7 +475,11 @@ function loadUserConfig() {
     free: false,
     noCost: false,
     customRates: {},
-    customPricing: {}
+    customPricing: {},
+    quota: {
+      limit5h: DEFAULT_QUOTA_5H,
+      limit7d: DEFAULT_QUOTA_7D
+    }
   };
 
   // 1. Try loading bundled data/pricing.json
@@ -636,6 +557,10 @@ function loadUserConfig() {
       if (user.models && typeof user.models === 'object') {
         mergePricingDict(user.models, config.customPricing);
       }
+      if (user.quota && typeof user.quota === 'object') {
+        config.quota.limit5h = user.quota.limit5h || DEFAULT_QUOTA_5H;
+        config.quota.limit7d = user.quota.limit7d || DEFAULT_QUOTA_7D;
+      }
     }
   } catch (_err) {
     // Ignore invalid user config file
@@ -702,6 +627,8 @@ module.exports = {
   USER_PRICING_FILE,
   ALT_PRICING_FILE,
   REMOTE_PRICING_CACHE_FILE,
+  GEMINI_QUOTA_CACHE_FILE,
+  GEMINI_QUOTA_CACHE_TTL_MS,
   BUNDLED_PRICING_FILE,
   DASHBOARD_DIR,
   DASHBOARD_HTML_FILE,
@@ -710,6 +637,8 @@ module.exports = {
   DASHBOARD_SERVER_PORT_FILE,
   DASHBOARD_DEFAULT_PORT,
   DASHBOARD_WRITE_THROTTLE_MS,
+  DEFAULT_QUOTA_5H,
+  DEFAULT_QUOTA_7D,
   MODEL_PRICING,
   CURRENCIES,
   FLASH_PATTERN,
@@ -722,6 +651,7 @@ module.exports = {
   getModelPricing,
   mergePricingDict,
   loadUserConfig,
+  loadSettings: loadUserConfig,
   calculateCostUsd,
   calculateCacheSavingsUsd,
   convertCurrency
