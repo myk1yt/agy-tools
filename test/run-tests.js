@@ -3849,6 +3849,70 @@ async function runAllTests() {
     });
   });
 
+  // --- Suite 25: Cross-Platform Installer Scripts Unit Tests ---
+  await describe('25. Cross-Platform Installer Scripts Unit Tests (install.bat & install.sh)', async () => {
+    const rootDir = path.resolve(__dirname, '..');
+    const batPath = path.join(rootDir, 'scripts', 'install.bat');
+    const shPath = path.join(rootDir, 'scripts', 'install.sh');
+
+    await test('scripts/install.bat should exist with CRLF line endings and robust syntax', () => {
+      assert(fs.existsSync(batPath), 'scripts/install.bat must exist');
+      const rawBat = fs.readFileSync(batPath, 'utf8');
+
+      // Verify line endings
+      assert(rawBat.includes('\r\n'), 'install.bat must contain CRLF line endings for Windows cmd.exe');
+
+      // Node.js >= 16 check and npm check
+      assert(rawBat.includes('where node'), 'install.bat must check where node');
+      assert(rawBat.includes('process.versions.node'), 'install.bat must check Node.js version >= 16');
+      assert(rawBat.includes('where npm'), 'install.bat must check where npm');
+
+      // Canonical ROOT_DIR
+      assert(rawBat.includes('for %%I in ("%SCRIPT_DIR%..") do set "ROOT_DIR=%%~fI"'), 'install.bat must canonicalize ROOT_DIR');
+
+      // Fallback launchers for all 4 binaries
+      assert(rawBat.includes('agy-tools.bat'), 'install.bat must generate agy-tools.bat shim');
+      assert(rawBat.includes('antigravity-tools.bat'), 'install.bat must generate antigravity-tools.bat shim');
+      assert(rawBat.includes('agy-tokens.bat'), 'install.bat must generate agy-tokens.bat shim');
+      assert(rawBat.includes('agy-dashboard.bat'), 'install.bat must generate agy-dashboard.bat shim');
+      assert(rawBat.includes('mkdir'), 'install.bat must create fallback bin directory if missing');
+
+      // Settings snippet
+      assert(rawBat.includes('"type": "command"'), 'install.bat statusLine snippet must include "type": "command"');
+      assert(rawBat.includes('"command": "agy-tokens --hook --raw --write-dashboard"'), 'install.bat must show standard command');
+      assert(rawBat.includes('C:\\\\PROGRA~1'), 'install.bat must double-escape backslashes for 8.3 JSON snippet');
+    });
+
+    await test('scripts/install.sh should exist with LF line endings, POSIX redirects, and all 4 symlinks', () => {
+      assert(fs.existsSync(shPath), 'scripts/install.sh must exist');
+      const rawSh = fs.readFileSync(shPath, 'utf8');
+
+      // Verify line endings (LF, no CRLF)
+      assert(!rawSh.includes('\r\n'), 'install.sh must not contain CRLF line endings');
+
+      // Node.js >= 16 check and npm check
+      assert(rawSh.includes('command -v node'), 'install.sh must check node binary');
+      assert(rawSh.includes('process.versions.node'), 'install.sh must check Node.js version >= 16');
+      assert(rawSh.includes('command -v npm'), 'install.sh must check npm binary');
+
+      // Non-failing chmod
+      assert(rawSh.includes('chmod +x') && rawSh.includes('|| true'), 'install.sh must use non-failing chmod');
+
+      // POSIX redirects
+      assert(rawSh.includes('>/dev/null 2>&1'), 'install.sh must use POSIX redirects');
+
+      // Fallback symlinks for all 4 binaries matching package.json bin
+      assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-tools.js" "$USER_BIN/agy-tools"'), 'install.sh must link agy-tools');
+      assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-tools.js" "$USER_BIN/antigravity-tools"'), 'install.sh must link antigravity-tools');
+      assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-tokens.js" "$USER_BIN/agy-tokens"'), 'install.sh must link agy-tokens');
+      assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-tokens.js" "$USER_BIN/agy-dashboard"'), 'install.sh must link agy-dashboard');
+
+      // Settings snippet
+      assert(rawSh.includes('"type": "command"'), 'install.sh statusLine snippet must include "type": "command"');
+      assert(rawSh.includes('"command": "agy-tokens --hook --raw --write-dashboard"'), 'install.sh must show standard command');
+    });
+  });
+
   // --- Summary & Exit Code ---
   const duration = Date.now() - startTime;
   console.log('\n\x1b[1m=======================================================');
