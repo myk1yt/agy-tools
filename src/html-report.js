@@ -15,16 +15,25 @@
 const fs = require('fs');
 const path = require('path');
 const {
-  DASHBOARD_DIR,
-  DASHBOARD_HTML_FILE,
-  DASHBOARD_DATA_JS,
-  DASHBOARD_DATA_JSON,
+  DASHBOARD_DIR: CONFIG_DASHBOARD_DIR,
+  DASHBOARD_HTML_FILE: CONFIG_DASHBOARD_HTML_FILE,
+  DASHBOARD_DATA_JS: CONFIG_DASHBOARD_DATA_JS,
+  DASHBOARD_DATA_JSON: CONFIG_DASHBOARD_DATA_JSON,
   DASHBOARD_DEFAULT_PORT,
   DASHBOARD_WRITE_THROTTLE_MS,
   CURRENCIES,
   calculateCostUsd,
   calculateCacheSavingsUsd
 } = require('./config');
+
+// Dashboard artifact paths: overridable module state (test hook, mirrors the
+// resetDashboardWriteState() pattern). Defaults to the production config
+// constants; _setDashboardDirForTests() re-points them at a temp directory so
+// tests never write to the real ~/.gemini/antigravity-dashboard/ directory.
+let DASHBOARD_DIR = CONFIG_DASHBOARD_DIR;
+let DASHBOARD_HTML_FILE = CONFIG_DASHBOARD_HTML_FILE;
+let DASHBOARD_DATA_JS = CONFIG_DASHBOARD_DATA_JS;
+let DASHBOARD_DATA_JSON = CONFIG_DASHBOARD_DATA_JSON;
 const { formatLocalDate, summarizeTurns } = require('./aggregator');
 const { t, getLocale, getAllTranslations, isRtl } = require('./i18n');
 
@@ -363,11 +372,14 @@ function dashboardCurrencyFmt(currencyCode, isFree) {
  * - Default: <script src="dashboard-data.js?v=ts"> injection polling (works on
  *   file:// where fetch/XHR are CORS-blocked — C3).
  * - Auto-upgrade: EventSource SSE push when the optional --serve server is up;
- *   falls back to polling automatically on error.
+ *   falls back to polling automatically on error. SSE_PORT_HINT is baked at
+ *   write time; the client retries hint+1..hint+3 at runtime (Fix 4) because
+ *   the live server may have auto-incremented its port (EADDRINUSE).
  * @param {object} payload - DashboardPayload.
  * @param {object} [opts]
  * @param {number} [opts.refreshSec=5] - Polling interval in seconds.
- * @param {number} [opts.servePort=8787] - Port for the SSE upgrade URL.
+ * @param {number} [opts.servePort=8787] - Hint port for the SSE upgrade URL;
+ *   the client retries hint+1..hint+3 before falling back to polling.
  * @returns {string} Complete HTML document.
  */
 function renderDashboardHtml(payload, opts = {}) {
@@ -388,6 +400,7 @@ function renderDashboardHtml(payload, opts = {}) {
     `  var FMT = ${fmtJson};`,
     `  var REFRESH_MS = ${Math.round(refreshSec * 1000)};`,
     `  var SSE_URL = '${sseUrl}';`,
+    `  var SSE_PORT_HINT = ${servePort};`,
     `  var currentLang = '${lang}';`,
     "  var filterState = { range: 'today', from: null, to: null, models: new Set() };",
     "  var allModels = [];",
@@ -940,17 +953,31 @@ function renderDashboardHtml(payload, opts = {}) {
     "      }",
     "      if (sc.parentNode) sc.parentNode.removeChild(sc);",
     "    };",
-    "    sc.onerror = function () { if (sc.parentNode) sc.parentNode.removeChild(sc); };",
+    "    sc.onerror = function () {",
+    "      setLive(false);",
+    "      console.warn('[agy-dashboard] data poll failed');",
+    "      if (sc.parentNode) sc.parentNode.removeChild(sc);",
+    "    };",
     "    document.head.appendChild(sc);",
     "  }",
     "  function startPolling() { if (!pollTimer) pollTimer = setInterval(pollOnce, REFRESH_MS); }",
     "  function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }",
     "",
     "  var sseActive = false;",
+    "  var sseAttempt = 0;",
+    "  var sseEverOpened = false;",
+    "  // SSE port retry ladder (Fix 4): SSE_URL bakes the port known at HTML-write",
+    "  // time, but the live server may have auto-incremented (EADDRINUSE -> 8788+).",
+    "  // Ladder: try the hint port first; while no SSE connection has ever opened,",
+    "  // retry ONCE each on hint+1, hint+2, hint+3 (1s apart) before giving up to",
+    "  // polling. Once a port is found, EventSource auto-reconnects to it on",
+    "  // transient drops (unchanged legacy behavior).",
+    "  function sseUrlForPort(port) { return 'http://127.0.0.1:' + port + '/events'; }",
     "  function trySse() {",
     "    try {",
-    "      var es = new EventSource(SSE_URL);",
-    "      es.onopen = function () { sseActive = true; stopPolling(); setLive(true); };",
+    "      var url = sseAttempt === 0 ? SSE_URL : sseUrlForPort(SSE_PORT_HINT + sseAttempt);",
+    "      var es = new EventSource(url);",
+    "      es.onopen = function () { sseEverOpened = true; sseActive = true; stopPolling(); setLive(true); };",
     "      es.onmessage = function (ev) {",
     "        try {",
     "          var p = JSON.parse(ev.data);",
@@ -960,7 +987,17 @@ function renderDashboardHtml(payload, opts = {}) {
     "          setLive(true);",
     "        } catch (e) {}",
     "      };",
-    "      es.onerror = function () { sseActive = false; startPolling(); setLive(false); };",
+    "      es.onerror = function () {",
+    "        sseActive = false;",
+    "        setLive(false);",
+    "        startPolling();",
+    "        if (sseEverOpened) return; // live stream dropped: EventSource auto-reconnects to the same port",
+    "        try { es.close(); } catch (e2) {}",
+    "        if (sseAttempt < 3) {",
+    "          sseAttempt += 1;",
+    "          setTimeout(trySse, 1000);",
+    "        }",
+    "      };",
     "    } catch (e) { startPolling(); }",
     "  }",
     "",
@@ -1188,7 +1225,48 @@ function writeDashboardFiles(payload, opts = {}) {
 
   const localeMismatch = diskLangMismatch || htmlLangMismatch;
   const writeData = force || dataFilesMissing || localeMismatch || (dataChanged && throttleOk && !diskUnchanged);
-  const writeHtml = force || htmlMissing || localeMismatch;
+  const writeHtmlBase = force || htmlMissing || localeMismatch;
+
+  // Self-heal stale embedded payloads (E13b): when the existing dashboard.html
+  // would NOT otherwise be rewritten, check whether its embedded
+  // `window.__AGY_DASH__` payload is stale and rewrite the HTML so the first
+  // paint is never a stale-empty page. Stale = marker/parse failure, embedded
+  // content differing from the incoming payload, or an empty embedded payload
+  // while the incoming one has data. generatedAt and cacheStats.elapsedMs are
+  // excluded from the comparison: generatedAt is rebuilt per invocation and
+  // elapsedMs jitters per sync run, so neither indicates real staleness (this
+  // keeps the existing skip semantics intact in steady state). The check runs
+  // whenever the HTML is not already being written — gating it on !writeData
+  // would be dead code in the hook flow, where cacheStats.elapsedMs jitter
+  // makes writeData true on essentially every render (verified live).
+  let htmlStale = false;
+  if (!writeHtmlBase) {
+    try {
+      const html = fs.readFileSync(DASHBOARD_HTML_FILE, 'utf8');
+      const marker = 'window.__AGY_DASH__ = ';
+      const start = html.indexOf(marker);
+      const end = start === -1 ? -1 : html.indexOf(';</script>', start + marker.length);
+      const embedded = end === -1 ? null : JSON.parse(html.slice(start + marker.length, end));
+      const stableKey = (p) => {
+        if (!p || typeof p !== 'object') return null;
+        const { generatedAt: _g, ...rest } = p;
+        const cs = rest.cacheStats && typeof rest.cacheStats === 'object'
+          ? { ...rest.cacheStats, elapsedMs: 0 }
+          : rest.cacheStats;
+        return JSON.stringify({ ...rest, cacheStats: cs });
+      };
+      const embeddedEmpty =
+        (!embedded || typeof embedded !== 'object' ||
+          !Array.isArray(embedded.models) || embedded.models.length === 0) &&
+        Array.isArray(payload.models) && payload.models.length > 0;
+      const embeddedDiffers = stableKey(embedded) !== stableKey(payload);
+      htmlStale = embeddedEmpty || embeddedDiffers;
+    } catch (_err) {
+      htmlStale = true;
+    }
+  }
+
+  const writeHtml = writeHtmlBase || htmlStale;
 
   const results = { html: false, dataJs: false, dataJson: false, skipped: false };
 
@@ -1238,16 +1316,33 @@ function resetDashboardWriteState() {
   lastDataHash = null;
 }
 
+/**
+ * Re-points the dashboard artifact paths at a test directory (test hook).
+ * Mirrors resetDashboardWriteState(): artifact tests call this with a temp dir
+ * before writing and restore the production dir afterwards, so tests never
+ * touch the real ~/.gemini/antigravity-dashboard/ directory.
+ * @param {string} dir - Absolute directory for dashboard artifacts.
+ * @returns {{ dir: string, html: string, dataJs: string, dataJson: string }} Resolved paths.
+ */
+function _setDashboardDirForTests(dir) {
+  DASHBOARD_DIR = dir;
+  DASHBOARD_HTML_FILE = path.join(dir, 'dashboard.html');
+  DASHBOARD_DATA_JS = path.join(dir, 'dashboard-data.js');
+  DASHBOARD_DATA_JSON = path.join(dir, 'dashboard-data.json');
+  return { dir: DASHBOARD_DIR, html: DASHBOARD_HTML_FILE, dataJs: DASHBOARD_DATA_JS, dataJson: DASHBOARD_DATA_JSON };
+}
+
 module.exports = {
   DASHBOARD_PAYLOAD_VERSION,
   DASHBOARD_DEFAULT_REFRESH_SEC,
-  DASHBOARD_DIR,
-  DASHBOARD_HTML_FILE,
-  DASHBOARD_DATA_JS,
-  DASHBOARD_DATA_JSON,
+  get DASHBOARD_DIR() { return DASHBOARD_DIR; },
+  get DASHBOARD_HTML_FILE() { return DASHBOARD_HTML_FILE; },
+  get DASHBOARD_DATA_JS() { return DASHBOARD_DATA_JS; },
+  get DASHBOARD_DATA_JSON() { return DASHBOARD_DATA_JSON; },
   buildDashboardPayload,
   renderDashboardHtml,
   writeDashboardFiles,
   ensureDashboardHtml,
-  resetDashboardWriteState
+  resetDashboardWriteState,
+  _setDashboardDirForTests
 };

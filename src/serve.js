@@ -14,6 +14,7 @@ const fs = require('fs');
 const {
   DASHBOARD_HTML_FILE,
   DASHBOARD_DATA_JSON,
+  DASHBOARD_DATA_JS,
   DASHBOARD_DEFAULT_PORT
 } = require('./config');
 const { syncSessions } = require('./cache-manager');
@@ -132,6 +133,21 @@ function startDashboardServer(opts = {}) {
               'Cache-Control': 'no-store'
             });
             res.end(json);
+          } catch (_err) {
+            res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('{}');
+          }
+          return;
+        }
+
+        if (urlPath === '/dashboard-data.js') {
+          try {
+            const dataJs = fs.readFileSync(DASHBOARD_DATA_JS, 'utf8');
+            res.writeHead(200, {
+              'Content-Type': 'text/javascript; charset=utf-8',
+              'Cache-Control': 'no-store'
+            });
+            res.end(dataJs);
           } catch (_err) {
             res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
             res.end('{}');

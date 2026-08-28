@@ -1341,6 +1341,15 @@ async function runAllTests() {
   await describe('15. HTML Dashboard Report Unit Tests', async () => {
     const htmlReport = require('../src/html-report');
 
+    // Sandbox (root cause of the v3.3 blank dashboard): artifact-writing tests
+    // previously wrote test payloads into the REAL ~/.gemini/antigravity-dashboard/
+    // directory, clobbering the user's live dashboard with an empty embedded
+    // payload. Re-point the module's artifact paths at a temp dir for the whole
+    // suite; the production dir is restored at the end of this suite.
+    const testDashDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-dash-test-'));
+    const prodDashDir = htmlReport.DASHBOARD_DIR;
+    htmlReport._setDashboardDirForTests(testDashDir);
+
     await test('buildDashboardPayload should produce the DashboardPayload schema', () => {
       const sessions = [
         {
@@ -1626,6 +1635,57 @@ async function runAllTests() {
       // Third write with same locale should be skipped
       const res2 = htmlReport.writeDashboardFiles(payloadKo, {});
       assert.strictEqual(res2.skipped, true, 'Subsequent write with same locale should be skipped');
+    });
+
+    await test('writeDashboardFiles should rewrite HTML when embedded payload is stale (E13b)', () => {
+      htmlReport.resetDashboardWriteState();
+      // 1. Write a FRESH payload with data (force) so HTML + data files exist.
+      const freshSessions = [
+        {
+          sessionId: 'e13b',
+          modelName: 'gemini-3-pro',
+          startTime: new Date().toISOString(),
+          turns: [
+            { createdAt: new Date().toISOString(), inputTokens: 100, cachedTokens: 50, outputTokens: 20 }
+          ]
+        }
+      ];
+      const freshPayload = htmlReport.buildDashboardPayload(freshSessions, { currency: 'usd', lang: 'en' });
+      const write1 = htmlReport.writeDashboardFiles(freshPayload, { force: true });
+      assert.strictEqual(write1.html, true);
+      assert.strictEqual(write1.dataJs, true);
+
+      // 2. Corrupt the embedded payload in the HTML to simulate the stale-empty
+      //    artifact left by an older writer (models: 0, all-zero data).
+      const htmlPath = htmlReport.DASHBOARD_HTML_FILE;
+      const goodHtml = fs.readFileSync(htmlPath, 'utf8');
+      const stalePayload = { ...freshPayload, models: [], generatedAt: '2000-01-01T00:00:00.000Z' };
+      const staleHtml = goodHtml.replace(
+        /<script>window\.__AGY_DASH__ = [\s\S]*?<\/script>/,
+        `<script>window.__AGY_DASH__ = ${JSON.stringify(stalePayload)};</script>`
+      );
+      assert.notStrictEqual(staleHtml, goodHtml, 'embedded payload must have been replaced');
+      fs.writeFileSync(htmlPath, staleHtml, 'utf8');
+
+      // 3. Re-write the SAME fresh payload without force: data files are
+      //    unchanged (hash matches), but the embedded payload is stale-empty ->
+      //    the HTML must be rewritten (self-heal), data files untouched.
+      const res = htmlReport.writeDashboardFiles(freshPayload, {});
+      assert.strictEqual(res.dataJs, false, 'unchanged data files must not be rewritten');
+      assert.strictEqual(res.dataJson, false, 'unchanged data files must not be rewritten');
+      assert.strictEqual(res.html, true, 'stale embedded payload must trigger HTML rewrite');
+
+      // 4. The rewritten HTML embeds the fresh payload again (models > 0).
+      const healedHtml = fs.readFileSync(htmlPath, 'utf8');
+      const marker = 'window.__AGY_DASH__ = ';
+      const start = healedHtml.indexOf(marker);
+      const end = healedHtml.indexOf(';</script>', start + marker.length);
+      const embedded = JSON.parse(healedHtml.slice(start + marker.length, end));
+      assert.strictEqual(embedded.models.length, 1, 'healed HTML must embed the fresh payload');
+
+      // 5. Identical embedded payload -> skip behavior preserved (no rewrite).
+      const res2 = htmlReport.writeDashboardFiles(freshPayload, {});
+      assert.strictEqual(res2.skipped, true, 'identical embedded payload must keep skip semantics');
     });
 
     await test('renderDashboardHtml should include updateI18N function and lang attribute', () => {
@@ -1986,6 +2046,12 @@ async function runAllTests() {
       assert(Math.abs(dmHigh.costUsd - baseHigh) < 5e-7, 'dailyModels (High) must use base-model rates');
       assert(Math.abs(dmLow.costUsd - baseLow) < 5e-7, 'dailyModels (Low) must use base-model rates');
     });
+
+    // Restore the production dashboard dir and clean up the temp sandbox so
+    // other suites (and the user's real dashboard) are unaffected.
+    htmlReport._setDashboardDirForTests(prodDashDir);
+    htmlReport.resetDashboardWriteState();
+    fs.rmSync(testDashDir, { recursive: true, force: true });
   });
 
   // --- Suite 16: OSC 8 & New CLI Flags Unit Tests ---

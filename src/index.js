@@ -393,20 +393,41 @@ async function runCli(argv = process.argv) {
     });
 
     if (options.writeDashboard) {
-      const payload = htmlReport.buildDashboardPayload(syncResult.sessions, {
-        currency,
-        lang: targetLang || i18n.getLocale(),
-        isFree,
-        model: activeModel,
-        modelName: activeModel,
-        parsedCount: syncResult.parsedCount,
-        cachedCount: syncResult.cachedCount,
-        elapsedMs: syncResult.elapsedMs
-      });
-      htmlReport.writeDashboardFiles(payload, {
-        refreshSec: options.refreshSec,
-        servePort: options.servePort || config.DASHBOARD_DEFAULT_PORT
-      });
+      // Empty-sync guard (Fix 6): a transient empty aggregation (e.g. transcripts
+      // dir briefly unreadable) must never clobber good on-disk artifacts. When
+      // this sync produced zero sessions but the existing dashboard-data.json
+      // still holds real data, skip the write entirely. Silent by design — the
+      // statusline hook path must stay fast and quiet. (--html keeps force:true
+      // semantics and is NOT guarded.)
+      let skipEmptySyncWrite = false;
+      if (syncResult.sessions.length === 0) {
+        try {
+          if (fs.existsSync(config.DASHBOARD_DATA_JSON)) {
+            const prev = JSON.parse(fs.readFileSync(config.DASHBOARD_DATA_JSON, 'utf8'));
+            const prevHasData = (Array.isArray(prev.models) && prev.models.length > 0) ||
+              (Array.isArray(prev.daily) && prev.daily.some(d => d && d.totalTokens > 0));
+            if (prevHasData) skipEmptySyncWrite = true;
+          }
+        } catch (_err) {
+          // Unreadable/corrupt previous data: fall through and write normally.
+        }
+      }
+      if (!skipEmptySyncWrite) {
+        const payload = htmlReport.buildDashboardPayload(syncResult.sessions, {
+          currency,
+          lang: targetLang || i18n.getLocale(),
+          isFree,
+          model: activeModel,
+          modelName: activeModel,
+          parsedCount: syncResult.parsedCount,
+          cachedCount: syncResult.cachedCount,
+          elapsedMs: syncResult.elapsedMs
+        });
+        htmlReport.writeDashboardFiles(payload, {
+          refreshSec: options.refreshSec,
+          servePort: options.servePort || config.DASHBOARD_DEFAULT_PORT
+        });
+      }
     }
 
     if (options.raw) {
