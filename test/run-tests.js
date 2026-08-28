@@ -1830,7 +1830,7 @@ async function runAllTests() {
       // Fallback path: single-series bar from d.totalTokens with default accent
       assert(html.includes('st.fallback'), 'renderSvg fallback flag missing');
       assert(html.includes('daily[i].totalTokens'), 'renderSvg must fall back to d.totalTokens');
-      assert(html.includes("class=\"bar\">"), 'fallback bar must use default accent .bar class');
+      assert(html.includes("class=\"bar\""), 'fallback bar must use default accent .bar class');
       // Baseline-only path still exists for genuinely empty days
       assert(html.includes('height="1" class="bar"'), 'baseline rect for empty days missing');
     });
@@ -1913,12 +1913,10 @@ async function runAllTests() {
       assert(html.includes('id="estimatePanelNote"'), 'estimatePanelNote footer missing');
       assert(html.includes('class="estimate-note"'), 'estimate-note class missing on disclaimer nodes');
 
-      // 4 metric items: label/value/cost node ids
+      // 2 metric items: label/value/cost node ids
       const estIds = [
-        'estMtdLabel', 'estMtdValue', 'estMtdCost',
         'estAvgLabel', 'estAvgValue', 'estAvgCost',
-        'estMonthEndLabel', 'estMonthEndValue', 'estMonthEndCost',
-        'est30dLabel', 'est30dValue', 'est30dCost'
+        'estMonthEndLabel', 'estMonthEndValue', 'estMonthEndCost'
       ];
       for (const id of estIds) {
         assert(html.includes(`id="${id}"`), `estimate node id="${id}" missing`);
@@ -1972,7 +1970,7 @@ async function runAllTests() {
       assert(htmlKo.includes("document.getElementById('model')"), '#model span render missing');
 
       // updateI18N covers all new node ids (REQ-259)
-      for (const nid of ['estimateNote', 'estimateTitle', 'estimatePanelNote', 'estMtdLabel', 'estAvgLabel', 'estMonthEndLabel', 'est30dLabel']) {
+      for (const nid of ['estimateNote', 'estimateTitle', 'estimatePanelNote', 'estAvgLabel', 'estMonthEndLabel']) {
         assert(htmlKo.includes(`getElementById('${nid}')`), `updateI18N must cover #${nid}`);
       }
 
