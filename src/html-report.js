@@ -568,8 +568,25 @@ function renderDashboardHtml(payload, opts = {}) {
     "    if (idx < 0) idx = 0;",
     "    return MODEL_COLORS[idx % MODEL_COLORS.length];",
     "  }",
+    "  function niceMax(rawMax) {",
+    "    if (rawMax <= 0) return 10000;",
+    "    var headroom = rawMax * 1.15;",
+    "    var mag = Math.pow(10, Math.floor(Math.log10(headroom)));",
+    "    var norm = headroom / mag;",
+    "    var nice;",
+    "    if (norm <= 1) nice = 1;",
+    "    else if (norm <= 2) nice = 2;",
+    "    else if (norm <= 5) nice = 5;",
+    "    else nice = 10;",
+    "    return nice * mag;",
+    "  }",
+    "  function fmtAxis(v) {",
+    "    if (v >= 1000000) return (v / 1000000).toFixed(v % 1000000 === 0 ? 0 : 1) + 'M';",
+    "    if (v >= 1000) return (v / 1000).toFixed(v % 1000 === 0 ? 0 : 1) + 'K';",
+    "    return String(Math.round(v));",
+    "  }",
     "  function renderSvg(daily, dailyModels) {",
-    "    var W = 760, H = 200, PAD_L = 8, PAD_B = 22, PAD_T = 8;",
+    "    var W = 760, H = 200, PAD_L = 48, PAD_B = 22, PAD_T = 8;",
     "    var n = daily.length || 1;",
     "    var dm = dailyModels || {};",
     "    var ordered = [];",
@@ -595,9 +612,16 @@ function renderDashboardHtml(payload, opts = {}) {
     "      if (dayTotal > max) max = dayTotal;",
     "      stacks.push({ date: daily[i].date, segs: segs, total: dayTotal, fallback: fallback });",
     "    }",
-    "    if (max <= 0) max = 1;",
+    "    max = niceMax(max);",
     "    var innerH = H - PAD_B - PAD_T;",
-    "    var bw = (W - PAD_L * 2) / n;",
+    "    var bw = (W - PAD_L - 8) / n;",
+    "    var guides = '';",
+    "    for (var gi = 0; gi <= 4; gi++) {",
+    "      var gv = (gi / 4) * max;",
+    "      var gy = H - PAD_B - Math.round((gi / 4) * innerH);",
+    "      guides += '<line x1=\"' + PAD_L + '\" y1=\"' + gy + '\" x2=\"' + (W - 8) + '\" y2=\"' + gy + '\" class=\"guide\"/>';",
+    "      guides += '<text x=\"' + (PAD_L - 4) + '\" y=\"' + (gy + 3) + '\" class=\"yaxis\" text-anchor=\"end\">' + fmtAxis(gv) + '</text>';",
+    "    }",
     "    var bars = '';",
     "    for (i = 0; i < stacks.length; i++) {",
     "      var st = stacks[i];",
@@ -624,7 +648,7 @@ function renderDashboardHtml(payload, opts = {}) {
     "        bars += '<text x=\"' + (x + bw / 2).toFixed(1) + '\" y=\"' + (H - 6) + '\" class=\"axis\">' + esc(daily[i].date.slice(5)) + '</text>';",
     "      }",
     "    }",
-    "    return '<svg viewBox=\"0 0 ' + W + ' ' + H + '\" preserveAspectRatio=\"none\" role=\"img\"><text id=\"chartHoverLabel\" x=\"' + (PAD_L + 4) + '\" y=\"' + (PAD_T + 12) + '\" style=\"display:none;pointer-events:none\" fill=\"var(--text)\" font-size=\"11\" font-weight=\"600\"></text>' + bars + '</svg>';",
+    "    return '<svg viewBox=\"0 0 ' + W + ' ' + H + '\" preserveAspectRatio=\"none\" role=\"img\"><text id=\"chartHoverLabel\" x=\"' + (PAD_L + 4) + '\" y=\"' + (PAD_T + 12) + '\" style=\"display:none;pointer-events:none\" fill=\"var(--text)\" font-size=\"11\" font-weight=\"600\"></text>' + guides + bars + '</svg>';",
     "  }",
     "",
     "  function renderChart(p) {",
@@ -1035,6 +1059,8 @@ h1{font-size:20px}
 svg{width:100%;height:auto;display:block}
 .bar{fill:var(--accent);opacity:.85}
 .axis{fill:var(--dim);font-size:10px;text-anchor:middle}
+.guide{stroke:var(--border,#30363d);stroke-width:0.5;stroke-dasharray:4,4}
+.yaxis{fill:var(--text-secondary,#8b949e);font-size:10px;font-family:system-ui,-apple-system,sans-serif}
 .chart-legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:11px;color:var(--dim)}
 .legend-item{display:flex;align-items:center;gap:5px}
 .legend-swatch{display:inline-block;width:10px;height:10px;border-radius:2px;flex-shrink:0}
@@ -1152,7 +1178,7 @@ function atomicWriteFile(filePath, content) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  const tmpFile = `${filePath}.${Date.now()}.tmp`;
+  const tmpFile = `${filePath}.${Date.now()}.${process.pid}.tmp`;
   fs.writeFileSync(tmpFile, content, 'utf8');
   try {
     fs.renameSync(tmpFile, filePath);
@@ -1160,7 +1186,7 @@ function atomicWriteFile(filePath, content) {
     try { fs.unlinkSync(tmpFile); } catch (_e) { /* ignore */ }
     sleepSync(100);
     try {
-      const tmpFile2 = `${filePath}.${Date.now()}.tmp`;
+      const tmpFile2 = `${filePath}.${Date.now()}.${process.pid}.tmp`;
       fs.writeFileSync(tmpFile2, content, 'utf8');
       fs.renameSync(tmpFile2, filePath);
     } catch (_retryErr) {

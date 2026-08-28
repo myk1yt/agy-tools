@@ -355,88 +355,95 @@ async function runCli(argv = process.argv) {
   // 3c. Hook / 1-line badge mode (single sync pass feeds badge + optional
   //     dashboard write — C4: no second syncSessions call)
   if (options.hook) {
-    const stdinContext = await hookHandler.readStdinJson();
-    const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
-    const activeModel = options.model || config.getActiveModelFromSettings();
+    try {
+      const stdinContext = await hookHandler.readStdinJson();
+      const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
+      const activeModel = options.model || config.getActiveModelFromSettings();
 
-    // W1: OSC 8 hyperlink for the 📊 Dashboard badge segment. --no-link omits
-    // the segment entirely; NO_COLOR/TERM=dumb degrade to plain text inside
-    // formatOsc8Link (isOsc8Supported). Inside VS Code terminals file:// OSC 8
-    // links open in the EDITOR by design (vscode#39278/176812), so the badge
-    // links to the local http dashboard server instead (auto-started in the
-    // background, 127.0.0.1 only); AGY_TOKENS_LINK_MODE=file|http forces a
-    // mode. Any http failure falls back to the file:// link.
-    let dashboardLink = null;
-    if (!options.noLink) {
-      const linkTarget = dashboardLinkModule.resolveLinkTarget();
-      let linkUrl = linkTarget.url;
-      if (linkTarget.mode === 'http') {
-        const ensured = await dashboardLinkModule.ensureServerRunning();
-        linkUrl = ensured ? ensured.url : osc8.dashboardFileUrl();
+      // W1: OSC 8 hyperlink for the 📊 Dashboard badge segment. --no-link omits
+      // the segment entirely; NO_COLOR/TERM=dumb degrade to plain text inside
+      // formatOsc8Link (isOsc8Supported). Inside VS Code terminals file:// OSC 8
+      // links open in the EDITOR by design (vscode#39278/176812), so the badge
+      // links to the local http dashboard server instead (auto-started in the
+      // background, 127.0.0.1 only); AGY_TOKENS_LINK_MODE=file|http forces a
+      // mode. Any http failure falls back to the file:// link.
+      let dashboardLink = null;
+      if (!options.noLink) {
+        const linkTarget = dashboardLinkModule.resolveLinkTarget();
+        let linkUrl = linkTarget.url;
+        if (linkTarget.mode === 'http') {
+          const ensured = await dashboardLinkModule.ensureServerRunning();
+          linkUrl = ensured ? ensured.url : osc8.dashboardFileUrl();
+        }
+        dashboardLink = osc8.formatOsc8Link(linkUrl, `📊 ${i18n.t('dashboardLink')}`);
       }
-      dashboardLink = osc8.formatOsc8Link(linkUrl, `📊 ${i18n.t('dashboardLink')}`);
-    }
 
-    // ONE syncSessions pass shared by badge and dashboard writer (C4)
-    const syncResult = await cacheManager.syncSessions({
-      forceFresh: options.fresh,
-      modelName: activeModel
-    });
+      // ONE syncSessions pass shared by badge and dashboard writer (C4)
+      const syncResult = await cacheManager.syncSessions({
+        forceFresh: options.fresh,
+        modelName: activeModel
+      });
 
-    const result = await hookHandler.handlePostInvocation({
-      currency,
-      modelName: options.model,
-      isFree,
-      stdinContext,
-      sessions: syncResult.sessions,
-      link: dashboardLink
-    });
+      const result = await hookHandler.handlePostInvocation({
+        currency,
+        modelName: options.model,
+        isFree,
+        stdinContext,
+        sessions: syncResult.sessions,
+        link: dashboardLink
+      });
 
-    if (options.writeDashboard) {
-      // Empty-sync guard (Fix 6): a transient empty aggregation (e.g. transcripts
-      // dir briefly unreadable) must never clobber good on-disk artifacts. When
-      // this sync produced zero sessions but the existing dashboard-data.json
-      // still holds real data, skip the write entirely. Silent by design — the
-      // statusline hook path must stay fast and quiet. (--html keeps force:true
-      // semantics and is NOT guarded.)
-      let skipEmptySyncWrite = false;
-      if (syncResult.sessions.length === 0) {
-        try {
-          if (fs.existsSync(config.DASHBOARD_DATA_JSON)) {
-            const prev = JSON.parse(fs.readFileSync(config.DASHBOARD_DATA_JSON, 'utf8'));
-            const prevHasData = (Array.isArray(prev.models) && prev.models.length > 0) ||
-              (Array.isArray(prev.daily) && prev.daily.some(d => d && d.totalTokens > 0));
-            if (prevHasData) skipEmptySyncWrite = true;
+      if (options.writeDashboard) {
+        // Empty-sync guard (Fix 6): a transient empty aggregation (e.g. transcripts
+        // dir briefly unreadable) must never clobber good on-disk artifacts. When
+        // this sync produced zero sessions but the existing dashboard-data.json
+        // still holds real data, skip the write entirely. Silent by design — the
+        // statusline hook path must stay fast and quiet. (--html keeps force:true
+        // semantics and is NOT guarded.)
+        let skipEmptySyncWrite = false;
+        if (syncResult.sessions.length === 0) {
+          try {
+            if (fs.existsSync(config.DASHBOARD_DATA_JSON)) {
+              const prev = JSON.parse(fs.readFileSync(config.DASHBOARD_DATA_JSON, 'utf8'));
+              const prevHasData = (Array.isArray(prev.models) && prev.models.length > 0) ||
+                (Array.isArray(prev.daily) && prev.daily.some(d => d && d.totalTokens > 0));
+              if (prevHasData) skipEmptySyncWrite = true;
+            }
+          } catch (_err) {
+            // Unreadable/corrupt previous data: fall through and write normally.
           }
-        } catch (_err) {
-          // Unreadable/corrupt previous data: fall through and write normally.
+        }
+        if (!skipEmptySyncWrite) {
+          const payload = htmlReport.buildDashboardPayload(syncResult.sessions, {
+            currency,
+            lang: targetLang || i18n.getLocale(),
+            isFree,
+            model: activeModel,
+            modelName: activeModel,
+            parsedCount: syncResult.parsedCount,
+            cachedCount: syncResult.cachedCount,
+            elapsedMs: syncResult.elapsedMs
+          });
+          htmlReport.writeDashboardFiles(payload, {
+            refreshSec: options.refreshSec,
+            servePort: options.servePort || config.DASHBOARD_DEFAULT_PORT
+          });
         }
       }
-      if (!skipEmptySyncWrite) {
-        const payload = htmlReport.buildDashboardPayload(syncResult.sessions, {
-          currency,
-          lang: targetLang || i18n.getLocale(),
-          isFree,
-          model: activeModel,
-          modelName: activeModel,
-          parsedCount: syncResult.parsedCount,
-          cachedCount: syncResult.cachedCount,
-          elapsedMs: syncResult.elapsedMs
-        });
-        htmlReport.writeDashboardFiles(payload, {
-          refreshSec: options.refreshSec,
-          servePort: options.servePort || config.DASHBOARD_DEFAULT_PORT
-        });
-      }
-    }
 
-    if (options.raw) {
-      console.log(result.badge);
-    } else if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      // Default PostInvocation contract for Antigravity hook runner
-      console.log(JSON.stringify(hookHandler.formatHookResponse(result.badge)));
+      if (options.raw) {
+        console.log(result.badge);
+      } else if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        // Default PostInvocation contract for Antigravity hook runner
+        console.log(JSON.stringify(hookHandler.formatHookResponse(result.badge)));
+      }
+    } catch (_hookErr) {
+      try {
+        console.log(JSON.stringify({ injectSteps: [{ ephemeralMessage: '' }] }));
+      } catch (_e) { /* last resort: silent exit */ }
+      process.exit(0);
     }
     return;
   }

@@ -34,7 +34,7 @@ const SETTINGS_CHANGE_MARKER = '<USER_SETTINGS_CHANGE>';
  * repeated .exec() calls never resume from a stale lastIndex.
  * @type {RegExp}
  */
-const SETTINGS_CHANGE_RE = /changed setting `Model Selection` from .+? to ([^\n]+?)(?:[.!?;:,。！？；：](?:\s|$)|\n|[`—–<]|$)/;
+const SETTINGS_CHANGE_RE = /changed setting `Model Selection` from (.+?) to ([^\n]+?)(?:[.!?;:,。！？；：](?:\s|$)|\n|[`—–<]|$)/;
 
 /**
  * Loads history index from history.jsonl if available.
@@ -135,7 +135,12 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
   // Initialized from modelName param or getActiveModelFromSettings() (AD-2).
   let currentActiveModel = model;
 
+  const settingsChanges = []; // { lineIndex, fromModel, toModel }
+  const turnLineIndices = []; // parallel to turns[]
+  let lineIndex = 0;
+
   for await (const line of rl) {
+    lineIndex++;
     if (!line || !line.trim()) continue;
 
     let record = null;
@@ -174,13 +179,15 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
       // Settings change applies immediately to this turn and subsequent turns.
       if (content.includes(SETTINGS_CHANGE_MARKER)) {
         const settingsMatch = SETTINGS_CHANGE_RE.exec(content);
-        if (settingsMatch && settingsMatch[1]) {
+        if (settingsMatch && settingsMatch[2]) {
           // Defense-in-depth: strip any trailing sentence punctuation that
           // survived the regex boundary (e.g. a bare "." at line end) so the
           // stored identity is always a clean display string (REQ-255).
-          const overrideCandidate = settingsMatch[1].replace(/[.!?;:,。！？；：]+$/, '').trim();
-          if (overrideCandidate) {
-            currentActiveModel = overrideCandidate;
+          const fromCandidate = settingsMatch[1].replace(/[.!?;:,。！？；：]+$/, '').trim();
+          const toCandidate = settingsMatch[2].replace(/[.!?;:,。！？；：]+$/, '').trim();
+          settingsChanges.push({ lineIndex, fromModel: fromCandidate, toModel: toCandidate });
+          if (toCandidate) {
+            currentActiveModel = toCandidate;
           }
         }
       }
@@ -252,10 +259,34 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
       outputTokens: turnOutputTokens,
       totalTokens: turnTotalTokens,
       costUsd: turnCostUsd,
+      cacheSavingsUsd: turnCacheSavingsUsd,
       createdAt,
       preview,
       modelName: currentActiveModel
     });
+    turnLineIndices.push(lineIndex);
+  }
+
+  // Backtrack: if the first settings change has a meaningful `from` model,
+  // all turns before that change should be attributed to the `from` model.
+  if (settingsChanges.length > 0) {
+    const first = settingsChanges[0];
+    if (first.fromModel && first.fromModel.toLowerCase() !== 'none') {
+      for (let i = 0; i < turns.length; i++) {
+        if (turnLineIndices[i] < first.lineIndex) {
+          turns[i].modelName = first.fromModel;
+          turns[i].costUsd = calculateCostUsd(
+            turns[i].inputTokens, turns[i].cachedTokens, turns[i].outputTokens, first.fromModel
+          );
+          turns[i].cacheSavingsUsd = calculateCacheSavingsUsd(turns[i].cachedTokens || 0, first.fromModel);
+        } else {
+          break;
+        }
+      }
+      // Recalculate session totals
+      sessionCostUsd = turns.reduce((sum, t) => sum + (t.costUsd || 0), 0);
+      sessionCacheSavingsUsd = turns.reduce((sum, t) => sum + (t.cacheSavingsUsd || 0), 0);
+    }
   }
 
   const totalTokens = sessionInputTokens + sessionCachedTokens + sessionOutputTokens;

@@ -275,6 +275,27 @@ const MODEL_PRICING = {
 };
 
 /**
+ * Pre-sorted alias list for longest-match-first model alias resolution.
+ * Prevents shorter aliases (e.g., 'gpt-4o') from matching longer inputs
+ * (e.g., 'gpt-4o-mini') when iterating Object.keys in insertion order.
+ */
+let _sortedAliases = null;
+
+function _buildSortedAliases() {
+  const entries = [];
+  for (const key of Object.keys(MODEL_PRICING)) {
+    if (key === 'default') continue;
+    const info = MODEL_PRICING[key];
+    if (!info.aliases) continue;
+    for (const alias of info.aliases) {
+      entries.push({ alias: alias.toLowerCase(), info });
+    }
+  }
+  entries.sort((a, b) => b.alias.length - a.alias.length);
+  _sortedAliases = entries;
+}
+
+/**
  * Currency conversion table relative to USD.
  */
 const CURRENCIES = {
@@ -462,12 +483,12 @@ function getModelPricing(modelName) {
     return MODEL_PRICING[target];
   }
 
-  // 2. Exact or substring match against known model aliases
-  for (const key of Object.keys(MODEL_PRICING)) {
-    const info = MODEL_PRICING[key];
-    if (key === 'default') continue;
-    if (info.aliases && info.aliases.some(alias => alias.toLowerCase() === target || target.includes(alias.toLowerCase()))) {
-      return info;
+  // 2. Exact or substring match against known model aliases (longest alias wins)
+  if (_sortedAliases) {
+    for (const { alias, info } of _sortedAliases) {
+      if (alias === target || target.includes(alias)) {
+        return info;
+      }
     }
   }
 
@@ -519,6 +540,7 @@ function mergePricingDict(pricingDict, destination = null) {
       destination[normalizedKey] = modelEntry;
     }
   }
+  _buildSortedAliases();
 }
 
 /**
@@ -624,6 +646,7 @@ function loadUserConfig() {
 
 // Perform initial user config and pricing merge on load
 loadUserConfig();
+_buildSortedAliases();
 
 /**
  * Calculates token cost in USD based on input, cached input, and output tokens.

@@ -2666,6 +2666,207 @@ async function runAllTests() {
     });
   });
 
+  // --- Suite 19: Model Alias Priority (Part 3) ---
+  await describe('Model Alias Priority (Part 3)', async () => {
+    await test('getModelPricing("gpt-4o-mini") returns gpt-4o-mini, not gpt-4o', () => {
+      const pricing = config.getModelPricing('gpt-4o-mini');
+      assert.strictEqual(pricing.id, 'gpt-4o-mini');
+    });
+
+    await test('getModelPricing("gpt-4o") returns gpt-4o', () => {
+      const pricing = config.getModelPricing('gpt-4o');
+      assert.strictEqual(pricing.id, 'gpt-4o');
+    });
+
+    await test('getModelPricing("gemini-2.0-flash-lite") returns gemini-2.0-flash-lite', () => {
+      const pricing = config.getModelPricing('gemini-2.0-flash-lite');
+      assert.strictEqual(pricing.id, 'gemini-2.0-flash-lite');
+    });
+
+    await test('getModelPricing("gemini-2.0-flash") returns gemini-2.0-flash', () => {
+      const pricing = config.getModelPricing('gemini-2.0-flash');
+      assert.strictEqual(pricing.id, 'gemini-2.0-flash');
+    });
+
+    await test('getModelPricing("sonnet") still returns claude-3.5-sonnet via exact alias', () => {
+      const pricing = config.getModelPricing('sonnet');
+      assert.strictEqual(pricing.id, 'claude-3.5-sonnet');
+    });
+  });
+
+  // --- Suite 20: Statusline Fail-Safe (Part 1) ---
+  await describe('Statusline Fail-Safe (Part 1)', async () => {
+    await test('readStdinJson resolves without unhandled error after timeout', async () => {
+      // readStdinJson with short timeout on TTY should return null
+      const result = await hookHandler.readStdinJson(10);
+      assert.strictEqual(result, null);
+    });
+
+    await test('formatHookResponse returns valid injectSteps structure', () => {
+      const resp = hookHandler.formatHookResponse('test badge');
+      assert.ok(resp.injectSteps);
+      assert.strictEqual(resp.injectSteps.length, 1);
+      assert.strictEqual(resp.injectSteps[0].ephemeralMessage, 'test badge');
+    });
+  });
+
+  // --- Suite 21: Turn-Level Model Attribution (Part 2) ---
+  await describe('Turn-Level Model Attribution (Part 2)', async () => {
+    await test('summarizeTurns sums per-turn costUsd when available', () => {
+      const turns = [
+        { inputTokens: 100, cachedTokens: 0, outputTokens: 50, costUsd: 0.001 },
+        { inputTokens: 200, cachedTokens: 100, outputTokens: 80, costUsd: 0.003 }
+      ];
+      const summary = aggregator.summarizeTurns(turns, 'gpt-4o');
+      assert.strictEqual(summary.totalTurns, 2);
+      assert.ok(Math.abs(summary.costUsd - 0.004) < 0.0001);
+    });
+
+    await test('summarizeTurns falls back to single-model calc when costUsd missing', () => {
+      const turns = [
+        { inputTokens: 1000000, cachedTokens: 0, outputTokens: 0 },
+        { inputTokens: 1000000, cachedTokens: 0, outputTokens: 0 }
+      ];
+      const summary = aggregator.summarizeTurns(turns, 'gpt-4o');
+      // gpt-4o input: $2.50/M, 2M tokens = $5.00
+      assert.ok(summary.costUsd > 0);
+      assert.strictEqual(summary.totalTurns, 2);
+    });
+
+    await test('summarizeTurns handles empty turns array', () => {
+      const summary = aggregator.summarizeTurns([], 'gpt-4o');
+      assert.strictEqual(summary.totalTurns, 0);
+      assert.strictEqual(summary.costUsd, 0);
+    });
+
+    await test('summarizeTurns handles mixed-model turns correctly', () => {
+      const turns = [
+        { inputTokens: 100, cachedTokens: 0, outputTokens: 50, costUsd: 0.001, modelName: 'gpt-4o' },
+        { inputTokens: 200, cachedTokens: 0, outputTokens: 80, costUsd: 0.0005, modelName: 'gpt-4o-mini' }
+      ];
+      const summary = aggregator.summarizeTurns(turns);
+      assert.ok(Math.abs(summary.costUsd - 0.0015) < 0.0001);
+    });
+
+    await test('parseTranscriptFile backtracks initial turns to first fromModel', async () => {
+      const backtrackFile = path.join(os.tmpdir(), `backtrack-${Date.now()}.jsonl`);
+      const lines = [
+        JSON.stringify({
+          step_index: 0,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:00:00Z',
+          content: 'Initial query before settings change'
+        }),
+        JSON.stringify({
+          step_index: 1,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:00:05Z',
+          content: 'Initial model response'
+        }),
+        JSON.stringify({
+          step_index: 2,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:01:00Z',
+          content: '<USER_SETTINGS_CHANGE>\nchanged setting `Model Selection` from Claude Opus 4.6 (Thinking) to Gemini 3.7 Flash (High)\n</USER_SETTINGS_CHANGE>'
+        }),
+        JSON.stringify({
+          step_index: 3,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:01:05Z',
+          content: 'Response with Gemini'
+        })
+      ];
+      fs.writeFileSync(backtrackFile, lines.join('\n'), 'utf8');
+      try {
+        const parsed = await logParser.parseTranscriptFile(
+          backtrackFile,
+          'backtrack-session',
+          { title: 'Backtrack Test' },
+          'gpt-4o'
+        );
+        assert.strictEqual(parsed.turns.length, 4);
+        assert.strictEqual(parsed.turns[0].modelName, 'Claude Opus 4.6 (Thinking)');
+        assert.strictEqual(parsed.turns[1].modelName, 'Claude Opus 4.6 (Thinking)');
+        assert.strictEqual(parsed.turns[2].modelName, 'Gemini 3.7 Flash (High)');
+        assert.strictEqual(parsed.turns[3].modelName, 'Gemini 3.7 Flash (High)');
+        assert.deepStrictEqual(parsed.models, ['Claude Opus 4.6 (Thinking)', 'Gemini 3.7 Flash (High)']);
+      } finally {
+        if (fs.existsSync(backtrackFile)) fs.unlinkSync(backtrackFile);
+      }
+    });
+  });
+
+  // --- Suite 22: Dynamic Y-Axis Chart (Part 4) ---
+  await describe('Dynamic Y-Axis Chart (Part 4)', async () => {
+    // Test the niceMax algorithm (replicated from client-side code)
+    function niceMax(rawMax) {
+      if (rawMax <= 0) return 10000;
+      var headroom = rawMax * 1.15;
+      var mag = Math.pow(10, Math.floor(Math.log10(headroom)));
+      var norm = headroom / mag;
+      var nice;
+      if (norm <= 1) nice = 1;
+      else if (norm <= 2) nice = 2;
+      else if (norm <= 5) nice = 5;
+      else nice = 10;
+      return nice * mag;
+    }
+
+    function fmtAxis(v) {
+      if (v >= 1000000) return (v / 1000000).toFixed(v % 1000000 === 0 ? 0 : 1) + 'M';
+      if (v >= 1000) return (v / 1000).toFixed(v % 1000 === 0 ? 0 : 1) + 'K';
+      return String(Math.round(v));
+    }
+
+    await test('niceMax(0) returns 10000 (default 10K)', () => {
+      assert.strictEqual(niceMax(0), 10000);
+    });
+
+    await test('niceMax(3200) returns 5000', () => {
+      assert.strictEqual(niceMax(3200), 5000);
+    });
+
+    await test('niceMax(850000) returns 1000000', () => {
+      assert.strictEqual(niceMax(850000), 1000000);
+    });
+
+    await test('niceMax(42) returns 50', () => {
+      assert.strictEqual(niceMax(42), 50);
+    });
+
+    await test('niceMax(100) returns 200', () => {
+      assert.strictEqual(niceMax(100), 200);
+    });
+
+    await test('fmtAxis(0) returns "0"', () => {
+      assert.strictEqual(fmtAxis(0), '0');
+    });
+
+    await test('fmtAxis(500) returns "500"', () => {
+      assert.strictEqual(fmtAxis(500), '500');
+    });
+
+    await test('fmtAxis(5000) returns "5K"', () => {
+      assert.strictEqual(fmtAxis(5000), '5K');
+    });
+
+    await test('fmtAxis(1500000) returns "1.5M"', () => {
+      assert.strictEqual(fmtAxis(1500000), '1.5M');
+    });
+
+    await test('fmtAxis(2000000) returns "2M"', () => {
+      assert.strictEqual(fmtAxis(2000000), '2M');
+    });
+
+    await test('fmtAxis(85000) returns "85K"', () => {
+      assert.strictEqual(fmtAxis(85000), '85K');
+    });
+  });
+
   // --- Summary & Exit Code ---
   const duration = Date.now() - startTime;
   console.log('\n\x1b[1m=======================================================');

@@ -60,10 +60,16 @@ function summarizeTurns(turns, modelName = null) {
   const summary = createEmptySummary();
   summary.totalTurns = turns.length;
 
+  let hasPerTurnCosts = turns.length > 0;
   for (const turn of turns) {
     summary.inputTokens += turn.inputTokens || 0;
     summary.cachedTokens += turn.cachedTokens || 0;
     summary.outputTokens += turn.outputTokens || 0;
+    if (typeof turn.costUsd === 'number') {
+      summary.costUsd += turn.costUsd;
+    } else {
+      hasPerTurnCosts = false;
+    }
   }
 
   summary.totalTokens = summary.inputTokens + summary.cachedTokens + summary.outputTokens;
@@ -72,12 +78,13 @@ function summarizeTurns(turns, modelName = null) {
       ? (summary.cachedTokens / (summary.inputTokens + summary.cachedTokens)) * 100
       : 0;
 
-  summary.costUsd = calculateCostUsd(
-    summary.inputTokens,
-    summary.cachedTokens,
-    summary.outputTokens,
-    modelName
-  );
+  if (!hasPerTurnCosts) {
+    // Legacy fallback: recalculate from aggregate tokens with single model
+    summary.costUsd = calculateCostUsd(
+      summary.inputTokens, summary.cachedTokens, summary.outputTokens, modelName
+    );
+  }
+
   summary.cacheSavingsUsd = calculateCacheSavingsUsd(summary.cachedTokens, modelName);
 
   return summary;

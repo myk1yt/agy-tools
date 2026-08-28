@@ -136,7 +136,7 @@ function readPortFile(portFile = DASHBOARD_SERVER_PORT_FILE) {
  * @param {object} data - Serializable payload.
  */
 function atomicWriteJson(filePath, data) {
-  const tmp = `${filePath}.tmp`;
+  const tmp = `${filePath}.${Date.now()}.${process.pid}.tmp`;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tmp, filePath);

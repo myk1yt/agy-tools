@@ -31,6 +31,7 @@ function readStdinJson(timeoutMs = 50) {
       process.stdin.removeListener('data', onData);
       process.stdin.removeListener('end', onEnd);
       process.stdin.removeListener('error', onError);
+      process.stdin.on('error', () => {});
 
       if (!raw || !raw.trim()) {
         resolve(null);

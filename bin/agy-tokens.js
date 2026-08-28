@@ -6,7 +6,15 @@
 
 const { runCli } = require('../src/index');
 
+const isHookMode = process.argv.includes('--hook') || process.argv.includes('--badge');
+
 runCli().catch(err => {
+  if (isHookMode) {
+    try {
+      console.log(JSON.stringify({ injectSteps: [{ ephemeralMessage: '' }] }));
+    } catch (_e) { /* silent */ }
+    process.exit(0);
+  }
   console.error('\x1b[31m[Antigravity Token Tracker Error]\x1b[0m', err.message || err);
   process.exit(1);
 });
