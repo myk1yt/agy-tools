@@ -3,6 +3,7 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # Test and coverage
 coverage/
@@ -13,7 +14,25 @@ test/test-cache-*.json
 # Cache and local databases
 .gemini/
 *.tmp
+*.temp
+*.bak
 *.log
+*.out
+
+# Historical session artifacts, scratch reports & one-off verification files
+docs/*_session_*/
+docs/*-session-*/
+docs/*_session_*
+docs/*-session-*
+docs/*_report*.md
+docs/*-report*.md
+docs/NEW-SESSION-PROMPT*.md
+docs/requirement-checklist*.md
+docs/review-probe.js
+*-report.md
+*_report.md
+NEW-SESSION-PROMPT*.md
+requirement-checklist*.md
 
 # OS generated files
 .DS_Store
@@ -33,3 +52,4 @@ desktop.ini
 *.njsproj
 *.sln
 *.sw?
+*.swp
