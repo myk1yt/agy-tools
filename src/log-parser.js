@@ -128,10 +128,12 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
   let sessionInputTokens = 0;
   let sessionCachedTokens = 0;
   let sessionOutputTokens = 0;
+  let sessionCostUsd = 0;
+  let sessionCacheSavingsUsd = 0;
 
-  // Session-level model override from the LAST <USER_SETTINGS_CHANGE> block
-  // in this transcript (AD-2: LAST match wins; null when never changed).
-  let sessionModelOverride = null;
+  // Active model tracked at turn-level across <USER_SETTINGS_CHANGE> blocks.
+  // Initialized from modelName param or getActiveModelFromSettings() (AD-2).
+  let currentActiveModel = model;
 
   for await (const line of rl) {
     if (!line || !line.trim()) continue;
@@ -167,9 +169,9 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
       }
       preview = content.substring(0, 60).replace(/\r?\n/g, ' ');
 
-      // AD-2 / REQ-254: scan for the session's effective model+effort.
-      // Cheap substring pre-filter first, then the anchored regex; the LAST
-      // well-formed match in the session wins (session-level granularity).
+      // AD-2 / REQ-301: scan for model+effort changes in this turn.
+      // Cheap substring pre-filter first, then the anchored regex.
+      // Settings change applies immediately to this turn and subsequent turns.
       if (content.includes(SETTINGS_CHANGE_MARKER)) {
         const settingsMatch = SETTINGS_CHANGE_RE.exec(content);
         if (settingsMatch && settingsMatch[1]) {
@@ -178,7 +180,7 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
           // stored identity is always a clean display string (REQ-255).
           const overrideCandidate = settingsMatch[1].replace(/[.!?;:,。！？；：]+$/, '').trim();
           if (overrideCandidate) {
-            sessionModelOverride = overrideCandidate;
+            currentActiveModel = overrideCandidate;
           }
         }
       }
@@ -231,11 +233,14 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
     }
 
     const turnTotalTokens = turnInputTokens + turnCachedTokens + turnOutputTokens;
-    const turnCostUsd = calculateCostUsd(turnInputTokens, turnCachedTokens, turnOutputTokens, model);
+    const turnCostUsd = calculateCostUsd(turnInputTokens, turnCachedTokens, turnOutputTokens, currentActiveModel);
+    const turnCacheSavingsUsd = calculateCacheSavingsUsd(turnCachedTokens, currentActiveModel);
 
     sessionInputTokens += turnInputTokens;
     sessionCachedTokens += turnCachedTokens;
     sessionOutputTokens += turnOutputTokens;
+    sessionCostUsd += turnCostUsd;
+    sessionCacheSavingsUsd += turnCacheSavingsUsd;
 
     turns.push({
       stepIndex,
@@ -248,22 +253,18 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
       totalTokens: turnTotalTokens,
       costUsd: turnCostUsd,
       createdAt,
-      preview
+      preview,
+      modelName: currentActiveModel
     });
   }
 
   const totalTokens = sessionInputTokens + sessionCachedTokens + sessionOutputTokens;
-  // AD-2 fallback precedence: session override > modelName param > settings.
-  // `model` already encodes param || settings; the override parsed from the
-  // transcript takes highest precedence for session-level attribution.
-  // Per-turn costs above intentionally keep the pre-pass model (v3.3 scope:
-  // session-level granularity; session totals are the authoritative figure).
-  const finalModel = sessionModelOverride || model;
-  const costUsd = calculateCostUsd(sessionInputTokens, sessionCachedTokens, sessionOutputTokens, finalModel);
-  const cacheSavingsUsd = calculateCacheSavingsUsd(sessionCachedTokens, finalModel);
+  const costUsd = sessionCostUsd;
+  const cacheSavingsUsd = sessionCacheSavingsUsd;
   const cacheHitRate = (sessionInputTokens + sessionCachedTokens) > 0
     ? (sessionCachedTokens / (sessionInputTokens + sessionCachedTokens)) * 100
     : 0;
+  const models = [...new Set(turns.map(t => t.modelName).filter(Boolean))];
 
   return {
     sessionId,
@@ -279,7 +280,8 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
     costUsd,
     cacheSavingsUsd,
     cacheHitRate,
-    modelName: finalModel,
+    modelName: currentActiveModel,
+    models: models.length > 0 ? models : (currentActiveModel ? [currentActiveModel] : []),
     turns
   };
 }

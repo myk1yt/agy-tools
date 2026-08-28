@@ -659,6 +659,166 @@ async function runAllTests() {
       assert(!parsed.modelName.includes('No need to comment'), 'Model name must not contain prose suffix');
     });
 
+    await test('Should stamp each turn with active model across 2 settings changes and compute accurate session totals (REQ-307)', async () => {
+      const switchFile = path.join(tempDir, 'two-settings-change.jsonl');
+      const lines = [
+        JSON.stringify({
+          step_index: 0,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:00:00Z',
+          content: '<USER_SETTINGS_CHANGE>\nchanged setting `Model Selection` from None to Gemini 3.7 Flash (Low)\n</USER_SETTINGS_CHANGE>'
+        }),
+        JSON.stringify({
+          step_index: 1,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:00:05Z',
+          content: 'Working on phase 1.'
+        }),
+        JSON.stringify({
+          step_index: 2,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:01:00Z',
+          content: '<USER_SETTINGS_CHANGE>\nchanged setting `Model Selection` from Gemini 3.7 Flash (Low) to Gemini 3.7 Flash (High)\n</USER_SETTINGS_CHANGE>'
+        }),
+        JSON.stringify({
+          step_index: 3,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:01:05Z',
+          content: 'Working on phase 2.'
+        })
+      ];
+      fs.writeFileSync(switchFile, lines.join('\n'), 'utf8');
+
+      const parsed = await logParser.parseTranscriptFile(
+        switchFile,
+        'two-settings-session',
+        { title: 'Two Settings Changes' },
+        'gemini-3.7-flash'
+      );
+
+      assert.strictEqual(parsed.turnCount, 4);
+      assert.strictEqual(parsed.turns[0].modelName, 'Gemini 3.7 Flash (Low)');
+      assert.strictEqual(parsed.turns[1].modelName, 'Gemini 3.7 Flash (Low)');
+      assert.strictEqual(parsed.turns[2].modelName, 'Gemini 3.7 Flash (High)');
+      assert.strictEqual(parsed.turns[3].modelName, 'Gemini 3.7 Flash (High)');
+      assert.strictEqual(parsed.turns[parsed.turns.length - 1].modelName, 'Gemini 3.7 Flash (High)');
+
+      assert.strictEqual(parsed.modelName, 'Gemini 3.7 Flash (High)');
+      assert.deepStrictEqual(parsed.models, ['Gemini 3.7 Flash (Low)', 'Gemini 3.7 Flash (High)']);
+
+      // Per-turn cost must be > 0 and session cost must match sum of turn costs
+      assert(parsed.turns.every(t => typeof t.costUsd === 'number' && t.costUsd > 0), 'All turns should have costUsd > 0');
+      const sumTurnCosts = parsed.turns.reduce((acc, t) => acc + t.costUsd, 0);
+      assert(Math.abs(parsed.costUsd - sumTurnCosts) < 1e-9, `Session cost (${parsed.costUsd}) should equal sum of turn costs (${sumTurnCosts})`);
+    });
+
+    await test('Should track model transitions across 3 settings-changes preserving turn-level model boundaries (REQ-307)', async () => {
+      const threeSwitchFile = path.join(tempDir, 'three-settings-change.jsonl');
+      const lines = [
+        // Turn 0: Switch to Model 1
+        JSON.stringify({
+          step_index: 0,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:00:00Z',
+          content: '<USER_SETTINGS_CHANGE>\nchanged setting `Model Selection` from None to Gemini 3.7 Flash (Low)\n</USER_SETTINGS_CHANGE>'
+        }),
+        // Turn 1: Model response under Model 1
+        JSON.stringify({
+          step_index: 1,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:00:05Z',
+          content: 'Phase 1 response.'
+        }),
+        // Turn 2: Switch to Model 2
+        JSON.stringify({
+          step_index: 2,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:01:00Z',
+          content: '<USER_SETTINGS_CHANGE>\nchanged setting `Model Selection` from Gemini 3.7 Flash (Low) to Gemini 3.7 Flash (High)\n</USER_SETTINGS_CHANGE>'
+        }),
+        // Turn 3: Model response under Model 2
+        JSON.stringify({
+          step_index: 3,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:01:05Z',
+          content: 'Phase 2 response.'
+        }),
+        // Turn 4: Plain user input without settings change (remains Model 2)
+        JSON.stringify({
+          step_index: 4,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:02:00Z',
+          content: 'Continue with phase 2 task.'
+        }),
+        // Turn 5: Model response under Model 2
+        JSON.stringify({
+          step_index: 5,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:02:05Z',
+          content: 'Phase 2 continuation response.'
+        }),
+        // Turn 6: Switch to Model 3
+        JSON.stringify({
+          step_index: 6,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          created_at: '2026-08-27T08:03:00Z',
+          content: '<USER_SETTINGS_CHANGE>\nchanged setting `Model Selection` from Gemini 3.7 Flash (High) to Claude Opus 4.6 (Thinking)\n</USER_SETTINGS_CHANGE>'
+        }),
+        // Turn 7: Model response under Model 3
+        JSON.stringify({
+          step_index: 7,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-08-27T08:03:05Z',
+          content: 'Phase 3 response with Claude.'
+        })
+      ];
+      fs.writeFileSync(threeSwitchFile, lines.join('\n'), 'utf8');
+
+      const parsed = await logParser.parseTranscriptFile(
+        threeSwitchFile,
+        'three-settings-session',
+        { title: 'Three Settings Changes' },
+        'gemini-3.7-flash'
+      );
+
+      assert.strictEqual(parsed.turnCount, 8);
+      // Turn 0-1: Gemini 3.7 Flash (Low)
+      assert.strictEqual(parsed.turns[0].modelName, 'Gemini 3.7 Flash (Low)');
+      assert.strictEqual(parsed.turns[1].modelName, 'Gemini 3.7 Flash (Low)');
+      // Turn 2-5: Gemini 3.7 Flash (High)
+      assert.strictEqual(parsed.turns[2].modelName, 'Gemini 3.7 Flash (High)');
+      assert.strictEqual(parsed.turns[3].modelName, 'Gemini 3.7 Flash (High)');
+      assert.strictEqual(parsed.turns[4].modelName, 'Gemini 3.7 Flash (High)');
+      assert.strictEqual(parsed.turns[5].modelName, 'Gemini 3.7 Flash (High)');
+      // Turn 6-7: Claude Opus 4.6 (Thinking)
+      assert.strictEqual(parsed.turns[6].modelName, 'Claude Opus 4.6 (Thinking)');
+      assert.strictEqual(parsed.turns[7].modelName, 'Claude Opus 4.6 (Thinking)');
+
+      // Session modelName is last active model
+      assert.strictEqual(parsed.modelName, 'Claude Opus 4.6 (Thinking)');
+      // Session models list in first-appearance order
+      assert.deepStrictEqual(parsed.models, [
+        'Gemini 3.7 Flash (Low)',
+        'Gemini 3.7 Flash (High)',
+        'Claude Opus 4.6 (Thinking)'
+      ]);
+
+      const sumTurnCosts = parsed.turns.reduce((acc, t) => acc + t.costUsd, 0);
+      assert(Math.abs(parsed.costUsd - sumTurnCosts) < 1e-9);
+    });
+
     // Cleanup temp directory
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -2043,6 +2203,125 @@ async function runAllTests() {
       const dmLow = payload.dailyModels[todayStr]['Gemini 3.7 Flash (Low)'];
       assert(Math.abs(dmHigh.costUsd - baseHigh) < 5e-7, 'dailyModels (High) must use base-model rates');
       assert(Math.abs(dmLow.costUsd - baseLow) < 5e-7, 'dailyModels (Low) must use base-model rates');
+    });
+
+    await test('buildDashboardPayload should aggregate multi-model session at turn granularity (REQ-308)', () => {
+      const d1 = new Date('2026-08-27T10:00:00Z');
+      const d2 = new Date('2026-08-28T10:00:00Z');
+      const date1Str = aggregator.formatLocalDate(d1);
+      const date2Str = aggregator.formatLocalDate(d2);
+
+      const sessions = [
+        {
+          sessionId: 'multi-model-sess-1',
+          modelName: 'Claude Opus 4.6 (Thinking)',
+          startTime: d1.toISOString(),
+          endTime: d2.toISOString(),
+          inputTokens: 3000,
+          cachedTokens: 1500,
+          outputTokens: 600,
+          costUsd: 0.02035,
+          turns: [
+            // Turn 1 (Day 1): Gemini 3.7 Flash (High)
+            {
+              createdAt: d1.toISOString(),
+              modelName: 'Gemini 3.7 Flash (High)',
+              inputTokens: 1000,
+              cachedTokens: 500,
+              outputTokens: 200,
+              costUsd: config.calculateCostUsd(1000, 500, 200, 'Gemini 3.7 Flash (High)')
+            },
+            // Turn 2 (Day 2): Gemini 3.7 Flash (High) - second turn with same model
+            {
+              createdAt: d2.toISOString(),
+              modelName: 'Gemini 3.7 Flash (High)',
+              inputTokens: 500,
+              cachedTokens: 250,
+              outputTokens: 100,
+              costUsd: config.calculateCostUsd(500, 250, 100, 'Gemini 3.7 Flash (High)')
+            },
+            // Turn 3 (Day 2): Claude Opus 4.6 (Thinking)
+            {
+              createdAt: d2.toISOString(),
+              modelName: 'Claude Opus 4.6 (Thinking)',
+              inputTokens: 1500,
+              cachedTokens: 750,
+              outputTokens: 300,
+              costUsd: config.calculateCostUsd(1500, 750, 300, 'Claude Opus 4.6 (Thinking)')
+            }
+          ]
+        }
+      ];
+
+      const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en' });
+
+      // 1. payload.models has 2 distinct entries keyed by model name
+      assert(Array.isArray(payload.models) && payload.models.length === 2,
+        `expected 2 distinct model entries in models[], got ${payload.models.length}`);
+      const byModel = {};
+      for (const m of payload.models) byModel[m.model] = m;
+      const gemini = byModel['Gemini 3.7 Flash (High)'];
+      const claude = byModel['Claude Opus 4.6 (Thinking)'];
+      assert(gemini, 'Gemini 3.7 Flash (High) entry missing in models');
+      assert(claude, 'Claude Opus 4.6 (Thinking) entry missing in models');
+
+      // 2. Token / turn / session totals for each model
+      // Gemini: 2 turns (1000+500=1500 in, 500+250=750 cached, 200+100=300 out, total=2550)
+      assert.strictEqual(gemini.turns, 2);
+      assert.strictEqual(gemini.inputTokens, 1500);
+      assert.strictEqual(gemini.cachedTokens, 750);
+      assert.strictEqual(gemini.outputTokens, 300);
+      assert.strictEqual(gemini.totalTokens, 2550);
+      assert.strictEqual(gemini.sessions, 1, 'Gemini should have sessions === 1 (REQ-306)');
+
+      // Claude: 1 turn (1500 in, 750 cached, 300 out, total=2550)
+      assert.strictEqual(claude.turns, 1);
+      assert.strictEqual(claude.inputTokens, 1500);
+      assert.strictEqual(claude.cachedTokens, 750);
+      assert.strictEqual(claude.outputTokens, 300);
+      assert.strictEqual(claude.totalTokens, 2550);
+      assert.strictEqual(claude.sessions, 1, 'Claude should have sessions === 1 (REQ-306)');
+
+      // 3. Costs
+      const expectedGeminiCost = config.calculateCostUsd(1500, 750, 300, 'Gemini 3.7 Flash (High)');
+      const expectedClaudeCost = config.calculateCostUsd(1500, 750, 300, 'Claude Opus 4.6 (Thinking)');
+      assert(Math.abs(gemini.costUsd - expectedGeminiCost) < 5e-7,
+        `Gemini costUsd (${gemini.costUsd}) should match expected (${expectedGeminiCost})`);
+      assert(Math.abs(claude.costUsd - expectedClaudeCost) < 5e-7,
+        `Claude costUsd (${claude.costUsd}) should match expected (${expectedClaudeCost})`);
+
+      // 4. dailyModels mapping
+      assert(payload.dailyModels[date1Str], `dailyModels[${date1Str}] missing`);
+      assert(payload.dailyModels[date2Str], `dailyModels[${date2Str}] missing`);
+
+      // Date 1: only Gemini
+      const d1Gemini = payload.dailyModels[date1Str]['Gemini 3.7 Flash (High)'];
+      assert(d1Gemini, `dailyModels[${date1Str}]['Gemini 3.7 Flash (High)'] missing`);
+      assert.strictEqual(d1Gemini.turns, 1);
+      assert.strictEqual(d1Gemini.inputTokens, 1000);
+      assert.strictEqual(d1Gemini.cachedTokens, 500);
+      assert.strictEqual(d1Gemini.outputTokens, 200);
+      assert.strictEqual(d1Gemini.sessions, 1);
+
+      // Date 2: both Gemini and Claude
+      const d2Gemini = payload.dailyModels[date2Str]['Gemini 3.7 Flash (High)'];
+      const d2Claude = payload.dailyModels[date2Str]['Claude Opus 4.6 (Thinking)'];
+      assert(d2Gemini, `dailyModels[${date2Str}]['Gemini 3.7 Flash (High)'] missing`);
+      assert(d2Claude, `dailyModels[${date2Str}]['Claude Opus 4.6 (Thinking)'] missing`);
+      assert.strictEqual(d2Gemini.turns, 1);
+      assert.strictEqual(d2Gemini.inputTokens, 500);
+      assert.strictEqual(d2Gemini.cachedTokens, 250);
+      assert.strictEqual(d2Gemini.outputTokens, 100);
+      assert.strictEqual(d2Gemini.sessions, 1);
+
+      assert.strictEqual(d2Claude.turns, 1);
+      assert.strictEqual(d2Claude.inputTokens, 1500);
+      assert.strictEqual(d2Claude.cachedTokens, 750);
+      assert.strictEqual(d2Claude.outputTokens, 300);
+      assert.strictEqual(d2Claude.sessions, 1);
+
+      // 5. Total sessions in cacheStats remains 1
+      assert.strictEqual(payload.cacheStats.totalSessions, 1, 'Total cacheStats sessions must remain 1');
     });
 
     // Restore the production dashboard dir and clean up the temp sandbox so

@@ -127,45 +127,62 @@ function buildDashboardPayload(sessions, opts = {}) {
     dailyModelSessions.set(key, {});
   }
 
-  // Per-model accumulators (W4/REQ-107): each session is costed with its OWN
-  // modelName (session.modelName), never the global active model.
+  // Per-model accumulators (v3.4 / REQ-305, REQ-306): aggregated by turn.modelName
+  // with fallback chain: turn.modelName -> session.modelName -> opts.modelName -> 'unknown'.
+  // Each session contributes +1 to modelRow.sessions for every model active in >=1 of its turns.
   const modelsMap = new Map();
 
   for (const session of list) {
     if (!session || !Array.isArray(session.turns)) continue;
-    const sessionModel = session.modelName || modelName || 'unknown';
-    let modelRow = modelsMap.get(sessionModel);
-    if (!modelRow) {
-      modelRow = {
-        model: sessionModel,
-        displayName: sessionModel,
-        totalTokens: 0,
-        inputTokens: 0,
-        cachedTokens: 0,
-        outputTokens: 0,
-        cacheHitRate: 0,
-        costUsd: 0,
-        cacheSavingsUsd: 0,
-        sessions: 0,
-        turns: 0
-      };
-      modelsMap.set(sessionModel, modelRow);
-    }
-    modelRow.sessions += 1;
-    modelRow.turns += session.turns.length;
+    const sessionFallbackModel = session.modelName || modelName || 'unknown';
+    const modelsSeenInSession = new Set();
 
     for (const turn of session.turns) {
+      if (!turn) continue;
+      const turnModel = turn.modelName || sessionFallbackModel;
+      let modelRow = modelsMap.get(turnModel);
+      if (!modelRow) {
+        modelRow = {
+          model: turnModel,
+          displayName: turnModel,
+          totalTokens: 0,
+          inputTokens: 0,
+          cachedTokens: 0,
+          outputTokens: 0,
+          cacheHitRate: 0,
+          costUsd: 0,
+          cacheSavingsUsd: 0,
+          sessions: 0,
+          turns: 0
+        };
+        modelsMap.set(turnModel, modelRow);
+      }
+      if (!modelsSeenInSession.has(turnModel)) {
+        modelRow.sessions += 1;
+        modelsSeenInSession.add(turnModel);
+      }
+      modelRow.turns += 1;
+      modelRow.inputTokens += turn.inputTokens || 0;
+      modelRow.cachedTokens += turn.cachedTokens || 0;
+      modelRow.outputTokens += turn.outputTokens || 0;
+
+      const turnCost = (typeof turn.costUsd === 'number')
+        ? turn.costUsd
+        : calculateCostUsd(turn.inputTokens || 0, turn.cachedTokens || 0, turn.outputTokens || 0, turnModel);
+      modelRow.costUsd += turnCost;
+      modelRow.cacheSavingsUsd += calculateCacheSavingsUsd(turn.cachedTokens || 0, turnModel);
+
       const key = formatLocalDate(new Date(turn.createdAt));
       if (turnsByDate.has(key)) {
         turnsByDate.get(key).push(turn);
-        sessionIdsByDate.get(key).add(session.sessionId);
+        sessionIdsByDate.get(key).add(session.sessionId !== undefined ? session.sessionId : session);
 
         const dateModelMap = dailyModelsMap.get(key);
         if (dateModelMap) {
-          if (!dateModelMap[sessionModel]) {
-            dateModelMap[sessionModel] = {
-              model: sessionModel,
-              displayName: sessionModel,
+          if (!dateModelMap[turnModel]) {
+            dateModelMap[turnModel] = {
+              model: turnModel,
+              displayName: turnModel,
               totalTokens: 0,
               inputTokens: 0,
               cachedTokens: 0,
@@ -177,7 +194,7 @@ function buildDashboardPayload(sessions, opts = {}) {
               turns: 0
             };
           }
-          const dm = dateModelMap[sessionModel];
+          const dm = dateModelMap[turnModel];
           dm.inputTokens += turn.inputTokens || 0;
           dm.cachedTokens += turn.cachedTokens || 0;
           dm.outputTokens += turn.outputTokens || 0;
@@ -185,26 +202,14 @@ function buildDashboardPayload(sessions, opts = {}) {
 
           const dateSessionMap = dailyModelSessions.get(key);
           if (dateSessionMap) {
-            if (!dateSessionMap[sessionModel]) {
-              dateSessionMap[sessionModel] = new Set();
+            if (!dateSessionMap[turnModel]) {
+              dateSessionMap[turnModel] = new Set();
             }
-            dateSessionMap[sessionModel].add(session.sessionId !== undefined ? session.sessionId : session);
+            dateSessionMap[turnModel].add(session.sessionId !== undefined ? session.sessionId : session);
           }
         }
       }
-      modelRow.inputTokens += turn.inputTokens || 0;
-      modelRow.cachedTokens += turn.cachedTokens || 0;
-      modelRow.outputTokens += turn.outputTokens || 0;
     }
-
-    // Cost with the session's own model (per-session/per-turn accuracy).
-    modelRow.costUsd += calculateCostUsd(
-      session.inputTokens || 0,
-      session.cachedTokens || 0,
-      session.outputTokens || 0,
-      sessionModel
-    );
-    modelRow.cacheSavingsUsd += calculateCacheSavingsUsd(session.cachedTokens || 0, sessionModel);
   }
 
   // Finalize per-model rows: totals + cache hit rate, sorted by cost desc.
