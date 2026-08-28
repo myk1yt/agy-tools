@@ -22,6 +22,12 @@ const dashboardLinkModule = require('./dashboard-link');
 
 const pkg = require('../package.json');
 
+process.stdout.on('error', (err) => {
+  if (err.code === 'EPIPE' || err.code === 'EOF' || err.syscall === 'write') {
+    process.exit(0);
+  }
+});
+
 /**
  * Parses raw process.argv arguments into a structured options object.
  * @param {Array<string>} argv - CLI argument array.
@@ -328,6 +334,8 @@ async function runCli(argv = process.argv) {
 
     // Publish the authoritative bound port so hook renders can discover the
     // running server and link to it (atomic tmp+rename; DASHBOARD-LINK/serve/001).
+    // Note: The server monitors src/*.js for code updates and self-terminates (R1);
+    // the statusline hook auto-respawns a fresh server on the next render.
     dashboardLinkModule.writePortFile(serverInfo.port);
 
     // Graceful shutdown: clear the port file ONLY while it still points at

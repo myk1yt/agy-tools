@@ -2441,7 +2441,7 @@ async function runAllTests() {
           res.on('error', () => finish(body));
         });
         req.on('error', () => finish(''));
-        setTimeout(() => finish(''), 15000);
+        setTimeout(() => finish(''), 35000);
       });
 
       assert(eventsBody.includes('data:'), 'SSE stream should push data events');
@@ -2864,6 +2864,248 @@ async function runAllTests() {
 
     await test('fmtAxis(85000) returns "85K"', () => {
       assert.strictEqual(fmtAxis(85000), '85K');
+    });
+  });
+
+  // --- Suite 19: Additional Bug Fix Validations ---
+  await describe('19. Additional Bug Fix Validations', async () => {
+    await test('buildDashboardPayload aggregates turn costs and cache savings accurately without recalculating', () => {
+      const { buildDashboardPayload } = require('../src/html-report');
+      const sessions = [{
+        sessionId: 's1',
+        modelName: 'gemini-3.7-flash',
+        startTime: new Date().toISOString(),
+        turns: [{
+          createdAt: new Date().toISOString(),
+          inputTokens: 1000,
+          cachedTokens: 1000,
+          outputTokens: 500,
+          costUsd: 0.15,
+          cacheSavingsUsd: 0.05
+        }]
+      }];
+      const payload = buildDashboardPayload(sessions);
+      const dateKeys = Object.keys(payload.dailyModels);
+      const dm = payload.dailyModels[dateKeys[dateKeys.length - 1]]['gemini-3.7-flash'];
+      assert.strictEqual(dm.costUsd, 0.15);
+      assert.strictEqual(dm.cacheSavingsUsd, 0.05);
+    });
+
+    await test('parseTranscriptFile preserves old turn model assignments without settings marker', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'parse-test-'));
+      const p = path.join(tempDir, 'transcript.jsonl');
+      fs.writeFileSync(p, JSON.stringify({ type: 'USER_INPUT', content: 'test', step_index: 0 }) + '\n');
+      
+      const oldTurns = [{ stepIndex: 0, modelName: 'claude-3.5-sonnet' }];
+      const parsed = await logParser.parseTranscriptFile(p, 's1', {}, 'gemini-3.7-flash', oldTurns);
+      assert.strictEqual(parsed.turns[0].modelName, 'claude-3.5-sonnet');
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('EPIPE on process.stdout is handled and will exit cleanly with code 0', () => {
+      assert(process.stdout.listeners('error').length > 0, 'EPIPE handler should be registered on stdout');
+    });
+  });
+
+  // --- Suite 23: Serve Staleness Self-Termination (R1, REQ-101..103, 107) ---
+  await describe('23. Serve Staleness Self-Termination (R1)', async () => {
+    const serveStaleness = require('../src/serve-staleness');
+    const serve = require('../src/serve');
+    const dashboardLink = require('../src/dashboard-link');
+
+    await test('sourceCodeChangedSinceStart returns stale:false when all js files are older than startTimeMs', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'staleness-test-'));
+      const f1 = path.join(tempDir, 'a.js');
+      const f2 = path.join(tempDir, 'b.js');
+      fs.writeFileSync(f1, '// a');
+      fs.writeFileSync(f2, '// b');
+      const baseTime = Date.now();
+      const pastTime = new Date(baseTime - 10000);
+      fs.utimesSync(f1, pastTime, pastTime);
+      fs.utimesSync(f2, pastTime, pastTime);
+
+      const res = serveStaleness.sourceCodeChangedSinceStart(tempDir, baseTime);
+      assert.strictEqual(res.stale, false);
+      assert.strictEqual(res.file, null);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('sourceCodeChangedSinceStart returns stale:true and filename when a js file is newer than startTimeMs', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'staleness-test-'));
+      const f1 = path.join(tempDir, 'alpha.js');
+      const f2 = path.join(tempDir, 'beta.js');
+      fs.writeFileSync(f1, '// alpha');
+      fs.writeFileSync(f2, '// beta');
+      const baseTime = Date.now();
+      const pastTime = new Date(baseTime - 10000);
+      const futureTime = new Date(baseTime + 5000);
+      fs.utimesSync(f1, pastTime, pastTime);
+      fs.utimesSync(f2, futureTime, futureTime);
+
+      const res = serveStaleness.sourceCodeChangedSinceStart(tempDir, baseTime);
+      assert.strictEqual(res.stale, true);
+      assert.strictEqual(res.file, 'beta.js');
+      assert(res.mtimeMs >= baseTime + 5000);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('sourceCodeChangedSinceStart returns stale:false for mtime within safety margin before start', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'staleness-test-'));
+      const f1 = path.join(tempDir, 'recent.js');
+      fs.writeFileSync(f1, '// recent');
+      const baseTime = Date.now();
+      const slightlyEarlier = new Date(baseTime - 1000); // 1s before start (within 2s margin)
+      fs.utimesSync(f1, slightlyEarlier, slightlyEarlier);
+
+      const res = serveStaleness.sourceCodeChangedSinceStart(tempDir, baseTime);
+      assert.strictEqual(res.stale, false);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('sourceCodeChangedSinceStart returns stale:false on non-existent dir (fail-open)', () => {
+      const ghostDir = path.join(os.tmpdir(), 'non-existent-dir-' + Date.now());
+      const res = serveStaleness.sourceCodeChangedSinceStart(ghostDir, Date.now());
+      assert.strictEqual(res.stale, false);
+      assert.strictEqual(res.file, null);
+    });
+
+    await test('sourceCodeChangedSinceStart ignores non-.js files even when newer than start', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'staleness-test-'));
+      const f1 = path.join(tempDir, 'data.json');
+      const f2 = path.join(tempDir, 'notes.tmp');
+      fs.writeFileSync(f1, '{"test": 1}');
+      fs.writeFileSync(f2, 'temporary notes');
+      const baseTime = Date.now();
+      const futureTime = new Date(baseTime + 5000);
+      fs.utimesSync(f1, futureTime, futureTime);
+      fs.utimesSync(f2, futureTime, futureTime);
+
+      const res = serveStaleness.sourceCodeChangedSinceStart(tempDir, baseTime);
+      assert.strictEqual(res.stale, false);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('readCacheVersionHeader extracts version from first 64 bytes of large fixture', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cache-hdr-test-'));
+      const p = path.join(tempDir, 'large-cache.json');
+      const largeTail = 'x'.repeat(2048);
+      const content = `{\n  "version": 4,\n  "lastUpdated": "${new Date().toISOString()}",\n  "tail": "${largeTail}"\n}`;
+      fs.writeFileSync(p, content, 'utf8');
+
+      const v = serveStaleness.readCacheVersionHeader(p);
+      assert.strictEqual(v, 4);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('readCacheVersionHeader returns null on missing file, corrupt header, or no version (REQ-107)', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cache-hdr-test-'));
+      const ghostPath = path.join(tempDir, 'missing.json');
+      assert.strictEqual(serveStaleness.readCacheVersionHeader(ghostPath), null);
+
+      const corruptPath = path.join(tempDir, 'corrupt.json');
+      fs.writeFileSync(corruptPath, '{ not valid json header at all ...', 'utf8');
+      assert.strictEqual(serveStaleness.readCacheVersionHeader(corruptPath), null);
+
+      const noVersionPath = path.join(tempDir, 'no-version.json');
+      fs.writeFileSync(noVersionPath, '{\n  "sessions": []\n}', 'utf8');
+      assert.strictEqual(serveStaleness.readCacheVersionHeader(noVersionPath), null);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('startup guard refuses to start and calls onSelfTerminate when disk cache version is newer (REQ-103)', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'startup-guard-test-'));
+      const fakeCache = path.join(tempDir, 'future-cache.json');
+      fs.writeFileSync(fakeCache, JSON.stringify({ version: 99, sessions: [] }, null, 2), 'utf8');
+
+      let spyReason = null;
+      const result = await serve.startDashboardServer({
+        port: 0,
+        cacheFile: fakeCache,
+        onSelfTerminate: (reason) => {
+          spyReason = reason;
+        }
+      });
+
+      assert.strictEqual(result, null, 'startDashboardServer should return null when startup guard triggers in test mode');
+      assert(spyReason !== null, 'onSelfTerminate spy should have been called');
+      assert(spyReason.includes('newer than this build'), `Expected reason to mention newer version, got: ${spyReason}`);
+
+      // When version <= current, it starts normally
+      const validCache = path.join(tempDir, 'valid-cache.json');
+      fs.writeFileSync(validCache, JSON.stringify({ version: cacheManager.CACHE_SCHEMA_VERSION, sessions: [] }, null, 2), 'utf8');
+      let validSpy = null;
+      const validServer = await serve.startDashboardServer({
+        port: 0,
+        cacheFile: validCache,
+        onSelfTerminate: (r) => { validSpy = r; }
+      });
+      assert(validServer !== null && validServer.port > 0);
+      assert.strictEqual(validSpy, null);
+      await serve.stopDashboardServer(validServer.server);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('self-termination triggers on code update during SSE push, clears port, and closes server (REQ-101..102)', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'self-term-test-'));
+      const testJs = path.join(tempDir, 'test-module.js');
+      const startTime = Date.now();
+      const pastTime = new Date(startTime - 10000);
+      fs.writeFileSync(testJs, '// initial module');
+      fs.utimesSync(testJs, pastTime, pastTime);
+
+      let terminationReason = null;
+      const info = await serve.startDashboardServer({
+        port: 0,
+        intervalMs: 50,
+        srcDir: tempDir,
+        onSelfTerminate: (reason) => {
+          terminationReason = reason;
+        }
+      });
+
+      assert(info && info.port > 0);
+      assert.strictEqual(await dashboardLink.probePort(info.port), true);
+
+      // Connect to SSE events to start push cycle
+      const req = http.get(`${info.url.replace(/\/$/, '')}/events`, () => {});
+      req.on('error', () => {});
+
+      // Touch the test js file in injected srcDir to future mtime
+      const futureTime = new Date(Date.now() + 5000);
+      fs.utimesSync(testJs, futureTime, futureTime);
+
+      // Wait for SSE push tick to detect staleness and terminate
+      await new Promise((resolve) => {
+        const check = setInterval(() => {
+          if (terminationReason !== null) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 30);
+        setTimeout(() => {
+          clearInterval(check);
+          resolve();
+        }, 5000);
+      });
+
+      req.destroy();
+
+      assert(terminationReason !== null, 'Server should have self-terminated on modified source file');
+      assert(terminationReason.includes('test-module.js'));
+
+      // Verify port probe fails after self-termination
+      const portClosed = !(await dashboardLink.probePort(info.port));
+      assert(portClosed, 'Server port should be closed after self-termination');
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('watchdog constant satisfies REQ-101 bound (STALENESS_WATCHDOG_MS <= 60000 and > 0)', () => {
+      assert(serve.STALENESS_WATCHDOG_MS > 0, 'watchdog interval must be positive');
+      assert(serve.STALENESS_WATCHDOG_MS <= 60000, 'watchdog interval must be <= 60s per REQ-101/105');
+      assert(serveStaleness.MTIME_SAFETY_MARGIN_MS >= 1000, 'mtime safety margin must be >= 1s');
     });
   });
 

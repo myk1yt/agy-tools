@@ -15,12 +15,17 @@ const {
   DASHBOARD_HTML_FILE,
   DASHBOARD_DATA_JSON,
   DASHBOARD_DATA_JS,
-  DASHBOARD_DEFAULT_PORT
+  DASHBOARD_DEFAULT_PORT,
+  CACHE_FILE
 } = require('./config');
-const { syncSessions } = require('./cache-manager');
+const { syncSessions, CACHE_SCHEMA_VERSION } = require('./cache-manager');
 const { buildDashboardPayload } = require('./html-report');
+// Acyclic dependency: dashboard-link requires html-report and config only (never serve.js)
+const { removePortFileIfPort } = require('./dashboard-link');
+const staleness = require('./serve-staleness');
 
 const SSE_INTERVAL_MS = 5000;
+const STALENESS_WATCHDOG_MS = 30000; // REQ-101/105: <=60s; 30s chosen for responsive self-termination
 const PORT_RETRY_MAX = 10;
 
 /**
@@ -34,11 +39,62 @@ const PORT_RETRY_MAX = 10;
  * @param {string} [opts.modelName] - Model name used for pricing lookups.
  * @param {number} [opts.refreshSec] - HTML polling interval (embedded template).
  * @param {number} [opts.intervalMs=5000] - SSE push interval (test hook).
- * @returns {Promise<{ server: http.Server, port: number, url: string }>}
+ * @param {string} [opts.cacheFile] - Cache file path override (test hook).
+ * @param {string} [opts.srcDir] - Source directory path override (test hook).
+ * @param {Function} [opts.onSelfTerminate] - Callback on self-termination (test hook).
+ * @returns {Promise<{ server: http.Server, port: number, url: string }|null>}
  */
 function startDashboardServer(opts = {}) {
   const preferredPort = Number.isInteger(opts.port) ? opts.port : DASHBOARD_DEFAULT_PORT;
   const intervalMs = Number(opts.intervalMs) > 0 ? Number(opts.intervalMs) : SSE_INTERVAL_MS;
+  const targetCacheFile = typeof opts.cacheFile === 'string' ? opts.cacheFile : CACHE_FILE;
+  const targetSrcDir = typeof opts.srcDir === 'string' ? opts.srcDir : __dirname;
+  const onSelfTerminate = typeof opts.onSelfTerminate === 'function' ? opts.onSelfTerminate : null;
+
+  // REQ-103: refuse to start when the on-disk cache was written by NEWER code.
+  const diskCacheVersion = staleness.readCacheVersionHeader(targetCacheFile);
+  if (diskCacheVersion !== null && diskCacheVersion > CACHE_SCHEMA_VERSION) {
+    const reason = `refusing to start: on-disk cache schema v${diskCacheVersion} is newer than this build's v${CACHE_SCHEMA_VERSION}. Update agy-tools.`;
+    console.log(`[agy-dashboard] ${reason}`);
+    if (onSelfTerminate) {
+      onSelfTerminate(reason);
+      return Promise.resolve(null);
+    }
+    // Exit 0: this is a deliberate guard, not a crash; detached spawns must not
+    // surface a failure to the hook (which treats non-zero as spawn failure).
+    process.exit(0);
+  }
+
+  let terminated = false;
+
+  /**
+   * Gracefully terminates the dashboard server on detected staleness (REQ-102).
+   * Idempotent: concurrent triggers (SSE push + watchdog + signal) run once.
+   * @param {http.Server} server
+   * @param {number|null} boundPort
+   * @param {string} reason - One-line human reason for the console.
+   */
+  function selfTerminate(server, boundPort, reason) {
+    if (terminated) return;
+    terminated = true;
+    try { console.log(`[agy-dashboard] ${reason}`); } catch (_e) {}
+    if (boundPort) {
+      try { removePortFileIfPort(boundPort); } catch (_e) {}
+    }
+    if (onSelfTerminate) {
+      stopDashboardServer(server)
+        .then(() => { onSelfTerminate(reason); })
+        .catch(() => { onSelfTerminate(reason); });
+      return;
+    }
+    // Hard-exit fallback: if graceful close stalls >1s (lingering SSE socket on
+    // Node 16 without closeAllConnections), force exit (REQ-102).
+    const hardExit = setTimeout(() => process.exit(0), 1000);
+    if (typeof hardExit.unref === 'function') hardExit.unref();
+    stopDashboardServer(server)
+      .then(() => { clearTimeout(hardExit); process.exit(0); })
+      .catch(() => process.exit(0));
+  }
 
   const payloadOpts = {
     currency: opts.currency || 'usd',
@@ -53,7 +109,7 @@ function startDashboardServer(opts = {}) {
    * @returns {Promise<object>} DashboardPayload.
    */
   async function aggregate() {
-    const syncResult = await syncSessions({ modelName: payloadOpts.modelName });
+    const syncResult = await syncSessions({ modelName: payloadOpts.modelName, readOnly: true });
     return buildDashboardPayload(syncResult.sessions, {
       ...payloadOpts,
       parsedCount: syncResult.parsedCount,
@@ -70,6 +126,8 @@ function startDashboardServer(opts = {}) {
    */
   function tryListen(port, attempt) {
     return new Promise((resolve, reject) => {
+      let boundPortRef = null;
+
       const server = http.createServer((req, res) => {
         // CORS for file:// pages (origin null) — E10; localhost-only server (C6)
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -102,11 +160,19 @@ function startDashboardServer(opts = {}) {
           let closed = false;
           let inFlight = false;
           const push = async () => {
-            if (closed || inFlight) return;
+            if (closed || inFlight || terminated) return;
+            // REQ-101: staleness check per push — a stale server must die before it
+            // can push one more merged/old-schema payload to the dashboard.
+            const hit = staleness.sourceCodeChangedSinceStart(targetSrcDir, staleness.getProcessStartTimeMs());
+            if (hit.stale) {
+              selfTerminate(server, boundPortRef,
+                `self-terminating: source file changed on disk (${hit.file}) — restart for updated code`);
+              return;
+            }
             inFlight = true;
             try {
               const payload = await aggregate();
-              if (!closed) {
+              if (!closed && !terminated) {
                 res.write(`data: ${JSON.stringify(payload)}\n\n`);
               }
             } catch (_err) {
@@ -170,6 +236,24 @@ function startDashboardServer(opts = {}) {
 
       server.listen(port, '127.0.0.1', () => {
         const boundPort = server.address().port;
+        boundPortRef = boundPort;
+
+        // REQ-101/105: independent watchdog — catches clientless stale servers.
+        const watchdog = setInterval(() => {
+          if (terminated) {
+            clearInterval(watchdog);
+            return;
+          }
+          const hit = staleness.sourceCodeChangedSinceStart(targetSrcDir, staleness.getProcessStartTimeMs());
+          if (hit.stale) {
+            clearInterval(watchdog);
+            selfTerminate(server, boundPort,
+              `self-terminating: source file changed on disk (${hit.file}) — restart for updated code`);
+          }
+        }, STALENESS_WATCHDOG_MS);
+        if (typeof watchdog.unref === 'function') watchdog.unref(); // never keep process alive
+        server.once('close', () => clearInterval(watchdog));
+
         resolve({
           server,
           port: boundPort,
@@ -202,6 +286,7 @@ function stopDashboardServer(server) {
 
 module.exports = {
   SSE_INTERVAL_MS,
+  STALENESS_WATCHDOG_MS,
   PORT_RETRY_MAX,
   startDashboardServer,
   stopDashboardServer
