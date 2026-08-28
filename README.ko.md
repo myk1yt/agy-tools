@@ -92,14 +92,16 @@ flowchart TD
 {
   "statusLine": {
     "type": "command",
-    "command": "node <agy-tools-경로>/bin/agy-tokens.js --hook --raw --write-dashboard",
+    "command": "agy-tokens --hook --raw --write-dashboard",
     "enabled": true,
     "stack_with_default": true
   }
 }
 ```
 
-*(Windows 환경에서 전역 npm 설치 경로에 공백이 포함된 경우 8.3 축약 경로를 권장합니다: `C:\\PROGRA~1\\nodejs\\node.exe %APPDATA%\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard`)*
+- **전역 명령어 방식 (가장 권장)**: `npm link` 또는 설치 스크립트 실행 후 `"command": "agy-tokens --hook --raw --write-dashboard"`로 설정합니다.
+- **직접 Node 경로 지정 시**: `"command": "node /경로/agy-tools/bin/agy-tokens.js --hook --raw --write-dashboard"` (경로를 큰따옴표로 감싸지 마세요).
+- **Windows 8.3 축약 경로**: PATH가 자식 프로세스에 상속되지 않거나 공백이 포함된 경우 `"command": "C:\\PROGRA~1\\nodejs\\node.exe %APPDATA%\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard"`
 
 - `--hook`: Antigravity의 `PostInvocation` 훅 규격에 맞는 페이로드를 생성합니다.
 - `--raw`: 터미널 상태줄에 직접 출력하기 위해 JSON 래퍼를 벗겨낸 순수 텍스트를 출력합니다.

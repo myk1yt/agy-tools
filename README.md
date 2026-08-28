@@ -92,14 +92,16 @@ Add the `statusLine` hook to `~/.gemini/antigravity-cli/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": "node <path-to-agy-tools>/bin/agy-tokens.js --hook --raw --write-dashboard",
+    "command": "agy-tokens --hook --raw --write-dashboard",
     "enabled": true,
     "stack_with_default": true
   }
 }
 ```
 
-*(On Windows with global npm installations, you can use short 8.3 paths if spaces exist: `C:\\PROGRA~1\\nodejs\\node.exe %APPDATA%\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard`)*
+- **Global command (Recommended)**: `"command": "agy-tokens --hook --raw --write-dashboard"` works seamlessly after `npm link` or installer script.
+- **Direct Node path**: `"command": "node /path/to/agy-tools/bin/agy-tokens.js --hook --raw --write-dashboard"` (do NOT enclose path in extra quotes).
+- **Windows 8.3 short paths** (if PATH is not inherited): `"command": "C:\\PROGRA~1\\nodejs\\node.exe %APPDATA%\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard"`
 
 - `--hook`: Formats output for Antigravity's `PostInvocation` statusline runner.
 - `--raw`: Strips JSON wrapper for direct terminal statusline display.
