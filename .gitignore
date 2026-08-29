@@ -11,6 +11,11 @@ coverage/
 test-cache-*.json
 test/test-cache-*.json
 
+# Environment / secrets guard (never commit credential files)
+.env
+.env.*
+*.env
+
 # Cache and local databases
 .gemini/
 *.tmp
