@@ -3850,12 +3850,21 @@ async function runAllTests() {
   });
 
   // --- Suite 25: Cross-Platform Installer Scripts Unit Tests ---
-  await describe('25. Cross-Platform Installer Scripts Unit Tests (install.bat & install.sh)', async () => {
+  await describe('25. Cross-Platform Installer Scripts Unit Tests (install.bat & install.sh & configure-statusline.js)', async () => {
     const rootDir = path.resolve(__dirname, '..');
     const batPath = path.join(rootDir, 'scripts', 'install.bat');
     const shPath = path.join(rootDir, 'scripts', 'install.sh');
+    const configScriptPath = path.join(rootDir, 'scripts', 'lib', 'configure-statusline.js');
+    const {
+      configureStatusline,
+      getSettingsPath,
+      getTimestamp,
+      parseArgs,
+      writeAtomic,
+      DEFAULT_COMMAND
+    } = require(configScriptPath);
 
-    await test('scripts/install.bat should exist with CRLF line endings and robust syntax', () => {
+    await test('scripts/install.bat should exist with CRLF line endings, shims, and configure-statusline invocation', () => {
       assert(fs.existsSync(batPath), 'scripts/install.bat must exist');
       const rawBat = fs.readFileSync(batPath, 'utf8');
 
@@ -3877,13 +3886,13 @@ async function runAllTests() {
       assert(rawBat.includes('agy-dashboard.bat'), 'install.bat must generate agy-dashboard.bat shim');
       assert(rawBat.includes('mkdir'), 'install.bat must create fallback bin directory if missing');
 
-      // Settings snippet
+      // Automated configure-statusline invocation
+      assert(rawBat.includes('configure-statusline.js'), 'install.bat must invoke configure-statusline.js');
       assert(rawBat.includes('"type": "command"'), 'install.bat statusLine snippet must include "type": "command"');
-      assert(rawBat.includes('"command": "agy-tokens --hook --raw --write-dashboard"'), 'install.bat must show standard command');
-      assert(rawBat.includes('C:\\\\PROGRA~1'), 'install.bat must double-escape backslashes for 8.3 JSON snippet');
+      assert(rawBat.includes('!STATUSLINE_CMD!'), 'install.bat must reference statusline command variable');
     });
 
-    await test('scripts/install.sh should exist with LF line endings, POSIX redirects, and all 4 symlinks', () => {
+    await test('scripts/install.sh should exist with LF line endings, POSIX redirects, symlinks, and configure-statusline invocation', () => {
       assert(fs.existsSync(shPath), 'scripts/install.sh must exist');
       const rawSh = fs.readFileSync(shPath, 'utf8');
 
@@ -3907,9 +3916,130 @@ async function runAllTests() {
       assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-tokens.js" "$USER_BIN/agy-tokens"'), 'install.sh must link agy-tokens');
       assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-tokens.js" "$USER_BIN/agy-dashboard"'), 'install.sh must link agy-dashboard');
 
-      // Settings snippet
+      // Automated configure-statusline invocation
+      assert(rawSh.includes('configure-statusline.js'), 'install.sh must invoke configure-statusline.js');
       assert(rawSh.includes('"type": "command"'), 'install.sh statusLine snippet must include "type": "command"');
-      assert(rawSh.includes('"command": "agy-tokens --hook --raw --write-dashboard"'), 'install.sh must show standard command');
+      assert(rawSh.includes('$STATUSLINE_CMD'), 'install.sh must reference statusline command variable');
+    });
+
+    await test('scripts/lib/configure-statusline.js should create new settings.json when absent (REQ-403)', () => {
+      const testDir = path.join(os.tmpdir(), `agy-test-statusline-new-${Date.now()}`);
+      fs.mkdirSync(testDir, { recursive: true });
+      const testSettingsPath = path.join(testDir, 'settings.json');
+
+      try {
+        const result = configureStatusline({ settingsPath: testSettingsPath });
+        assert.strictEqual(result.action, 'created');
+        assert(fs.existsSync(testSettingsPath), 'settings.json should be created');
+
+        const parsed = JSON.parse(fs.readFileSync(testSettingsPath, 'utf8'));
+        assert.strictEqual(parsed.statusLine.type, 'command');
+        assert.strictEqual(parsed.statusLine.command, DEFAULT_COMMAND);
+        assert.strictEqual(parsed.statusLine.enabled, true);
+        assert.strictEqual(parsed.statusLine.stack_with_default, true);
+        assert(Array.isArray(parsed.trustedWorkspaces));
+      } finally {
+        fs.rmSync(testDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('scripts/lib/configure-statusline.js should merge statusLine into existing settings and create backup (REQ-401)', () => {
+      const testDir = path.join(os.tmpdir(), `agy-test-statusline-merge-${Date.now()}`);
+      fs.mkdirSync(testDir, { recursive: true });
+      const testSettingsPath = path.join(testDir, 'settings.json');
+
+      const initialSettings = {
+        colorScheme: 'dark',
+        telemetry: false,
+        trustedWorkspaces: ['/test/project']
+      };
+      fs.writeFileSync(testSettingsPath, JSON.stringify(initialSettings, null, 2), 'utf8');
+
+      try {
+        const result = configureStatusline({ settingsPath: testSettingsPath });
+        assert.strictEqual(result.action, 'updated');
+        assert(result.backupPath && fs.existsSync(result.backupPath), 'Backup file must exist');
+
+        // Verify backup preserves original content
+        const backupContent = JSON.parse(fs.readFileSync(result.backupPath, 'utf8'));
+        assert.strictEqual(backupContent.colorScheme, 'dark');
+        assert.strictEqual(backupContent.statusLine, undefined);
+
+        // Verify updated settings contains existing properties + statusLine
+        const updated = JSON.parse(fs.readFileSync(testSettingsPath, 'utf8'));
+        assert.strictEqual(updated.colorScheme, 'dark');
+        assert.strictEqual(updated.telemetry, false);
+        assert.deepStrictEqual(updated.trustedWorkspaces, ['/test/project']);
+        assert.strictEqual(updated.statusLine.type, 'command');
+        assert.strictEqual(updated.statusLine.command, DEFAULT_COMMAND);
+        assert.strictEqual(updated.statusLine.enabled, true);
+        assert.strictEqual(updated.statusLine.stack_with_default, true);
+      } finally {
+        fs.rmSync(testDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('scripts/lib/configure-statusline.js should be idempotent when statusLine already exists (REQ-404)', () => {
+      const testDir = path.join(os.tmpdir(), `agy-test-statusline-idempotent-${Date.now()}`);
+      fs.mkdirSync(testDir, { recursive: true });
+      const testSettingsPath = path.join(testDir, 'settings.json');
+
+      const initialSettings = {
+        colorScheme: 'light',
+        statusLine: {
+          type: 'command',
+          command: 'my-custom-statusline-cmd',
+          enabled: false
+        }
+      };
+      fs.writeFileSync(testSettingsPath, JSON.stringify(initialSettings, null, 2), 'utf8');
+
+      try {
+        const result = configureStatusline({ settingsPath: testSettingsPath });
+        assert.strictEqual(result.action, 'already_configured');
+        assert.strictEqual(result.backupPath, null);
+
+        const current = JSON.parse(fs.readFileSync(testSettingsPath, 'utf8'));
+        assert.strictEqual(current.statusLine.command, 'my-custom-statusline-cmd', 'Must not overwrite existing command');
+        assert.strictEqual(current.statusLine.enabled, false, 'Must not overwrite existing properties');
+      } finally {
+        fs.rmSync(testDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('scripts/lib/configure-statusline.js should recover from corrupt JSON with backup (REQ-403)', () => {
+      const testDir = path.join(os.tmpdir(), `agy-test-statusline-corrupt-${Date.now()}`);
+      fs.mkdirSync(testDir, { recursive: true });
+      const testSettingsPath = path.join(testDir, 'settings.json');
+
+      const corruptContent = '{ "colorScheme": "dark", INVALID_JSON... ';
+      fs.writeFileSync(testSettingsPath, corruptContent, 'utf8');
+
+      try {
+        const result = configureStatusline({ settingsPath: testSettingsPath });
+        assert.strictEqual(result.action, 'recovered_corrupt');
+        assert(result.backupPath && fs.existsSync(result.backupPath), 'Corrupt backup must be created');
+        assert.strictEqual(fs.readFileSync(result.backupPath, 'utf8'), corruptContent);
+
+        const fresh = JSON.parse(fs.readFileSync(testSettingsPath, 'utf8'));
+        assert.strictEqual(fresh.statusLine.command, DEFAULT_COMMAND);
+        assert.strictEqual(fresh.statusLine.enabled, true);
+      } finally {
+        fs.rmSync(testDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('scripts/lib/configure-statusline.js should support custom fallback commands and CLI arg parsing (REQ-405)', () => {
+      const parsed1 = parseArgs(['--command', 'node "/custom/path/agy-tokens.js" --hook']);
+      assert.strictEqual(parsed1.command, 'node "/custom/path/agy-tokens.js" --hook');
+
+      const parsed2 = parseArgs(['--command=custom-cmd', '--settings=/tmp/test.json', '--force']);
+      assert.strictEqual(parsed2.command, 'custom-cmd');
+      assert.strictEqual(parsed2.settingsPath, path.resolve('/tmp/test.json'));
+      assert.strictEqual(parsed2.force, true);
+
+      const parsed3 = parseArgs(['custom-positional-cmd']);
+      assert.strictEqual(parsed3.command, 'custom-positional-cmd');
     });
   });
 

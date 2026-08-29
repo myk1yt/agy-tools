@@ -68,9 +68,43 @@ flowchart TD
 
 ---
 
-## ⚡ 상태줄 연동 — 유일한 연동 포인트
+## 📦 초간단 설치 (Quick Start)
 
-`agy-tokens`는 터미널 상태줄을 통해 실시간 토큰 사용량을 표시합니다. **Antigravity 내부 코드를 전혀 수정할 필요가 없습니다.**
+사전 요구사항: **Node.js 16 이상** ([nodejs.org](https://nodejs.org)) 및 **Antigravity CLI**
+
+### 1️⃣ 원클릭 설치 (가장 추천)
+
+터미널에서 아래 3줄만 실행하면 **전역 명령어 등록 + 상태줄(`statusLine`) 자동 연동**까지 한 번에 완료됩니다.
+
+**Windows (명령 프롬프트 / PowerShell):**
+```cmd
+git clone https://github.com/myk1yt/agy-tools.git
+cd agy-tools
+scripts\install.bat
+```
+
+**Linux / macOS:**
+```bash
+git clone https://github.com/myk1yt/agy-tools.git
+cd agy-tools
+chmod +x scripts/install.sh && ./scripts/install.sh
+```
+
+### 2️⃣ 설치 후 바로 시작하기
+1. 실행 중인 **Antigravity CLI (`agy`)를 종료 후 다시 시작**합니다.
+2. 터미널 상태줄에 실시간 토큰 사용량 및 Gemini 쿼터가 즉시 표시됩니다!
+3. 브라우저 대시보드를 열려면 터미널의 `📊 대시보드`를 클릭하거나 아래 명령어를 실행하세요:
+```bash
+agy-tokens --html --open
+```
+
+---
+
+## ⚡ 상태줄 연동 및 동작 원리
+
+`agy-tokens`는 터미널 상태줄을 통해 실시간 토큰 사용량과 쿼터 상태를 표시합니다. **Antigravity 내부 코드를 전혀 수정할 필요가 없습니다.**
+
+설치 스크립트(`install.bat` / `install.sh`)를 실행하면 `~/.gemini/antigravity-cli/settings.json`에 `statusLine` 설정이 자동으로 안전하게 병합됩니다 (기존 설정 보존 및 자동 백업 생성).
 
 ### 간결하고 직관적인 상태줄 형식
 불필요한 접두어를 제거하여 깔끔하고 정보 밀도가 높은 상태줄을 제공합니다:
@@ -85,9 +119,16 @@ flowchart TD
 ⚡ [Antigravity] Turn: 1.2k ($0.0002) | Today: 45.8k ($0.0068) | Cache: 82% | 5h: ▰▰▰▰▱ 79% (4h 10m) | 7d: ▰▱▱▱▱ 21% (3d 20h) | 📊 Dashboard
 ```
 
-### 설정 파일 구성
-`~/.gemini/antigravity-cli/settings.json` 파일에 아래와 같이 `statusLine` 설정을 추가합니다:
+- `--hook`: Antigravity의 `PostInvocation` 훅 규격에 맞는 페이로드를 생성합니다.
+- `--raw`: 터미널 상태줄에 직접 출력하기 위해 JSON 래퍼를 벗겨낸 순수 텍스트를 출력합니다.
+- `--write-dashboard`: 턴이 실행될 때마다 대시보드 데이터 파일을 원자적으로 최신화합니다.
 
+### 🔧 수동 설정 및 문제 해결 (Troubleshooting)
+
+자동 설치 대신 수동으로 설정하거나, 특별한 환경에서 연동해야 하는 경우 아래 방법을 참조하세요.
+
+#### 수동 `settings.json` 설정
+`~/.gemini/antigravity-cli/settings.json`에 직접 `statusLine` 항목을 추가합니다:
 ```json
 {
   "statusLine": {
@@ -99,38 +140,9 @@ flowchart TD
 }
 ```
 
-- **전역 명령어 방식 (가장 권장)**: `npm link` 또는 설치 스크립트 실행 후 `"command": "agy-tokens --hook --raw --write-dashboard"`로 설정합니다.
-- **직접 Node 경로 지정 시**: `"command": "node /경로/agy-tools/bin/agy-tokens.js --hook --raw --write-dashboard"` (경로를 큰따옴표로 감싸지 마세요).
-- **Windows 8.3 축약 경로**: PATH가 자식 프로세스에 상속되지 않거나 공백이 포함된 경우 `"command": "C:\\PROGRA~1\\nodejs\\node.exe %APPDATA%\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard"`
-
-- `--hook`: Antigravity의 `PostInvocation` 훅 규격에 맞는 페이로드를 생성합니다.
-- `--raw`: 터미널 상태줄에 직접 출력하기 위해 JSON 래퍼를 벗겨낸 순수 텍스트를 출력합니다.
-- `--write-dashboard`: 턴이 실행될 때마다 대시보드 데이터 파일을 원자적으로 최신화합니다.
-
----
-
-## 📦 설치 및 빠른 시작
-
-### 방법 1: 전역 NPM 링크 (권장)
-
-```bash
-git clone https://github.com/myk1yt/agy-tools.git
-cd agy-tools
-npm link
-```
-
-### 방법 2: 원클릭 자동 설치 스크립트
-
-**Windows (명령 프롬프트 / PowerShell):**
-```cmd
-scripts\install.bat
-```
-
-**Linux / macOS:**
-```bash
-chmod +x scripts/install.sh
-./scripts/install.sh
-```
+- **직접 Node 경로 지정 시**: `"command": "node /경로/agy-tools/bin/agy-tokens.js --hook --raw --write-dashboard"`
+- **Windows 8.3 축약 경로 (PATH가 자식 프로세스에 상속되지 않는 경우)**:
+  `"command": "C:\\PROGRA~1\\nodejs\\node.exe %APPDATA%\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard"` (역슬래시는 `\\`로 이스케이프)
 
 ---
 

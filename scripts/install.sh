@@ -36,6 +36,7 @@ cd "$ROOT_DIR"
 if npm link >/dev/null 2>&1; then
     echo ""
     echo "[SUCCESS] agy-tools, agy-tokens, agy-dashboard, and antigravity-tools installed globally!"
+    STATUSLINE_CMD="agy-tokens --hook --raw --write-dashboard"
 else
     echo ""
     echo "[WARN] Global npm link required sudo or failed. Setting up user symlinks..."
@@ -47,23 +48,26 @@ else
     ln -sf "$ROOT_DIR/bin/agy-tokens.js" "$USER_BIN/agy-dashboard"
     echo "[SUCCESS] Created symlinks in $USER_BIN"
     echo "Make sure $USER_BIN is in your PATH."
+    STATUSLINE_CMD="node \"$ROOT_DIR/bin/agy-tokens.js\" --hook --raw --write-dashboard"
 fi
 
 echo ""
-echo "[INFO] Statusline integration (the ONLY integration point — agy itself is never modified):"
+echo "[INFO] Configuring Antigravity statusLine integration..."
+node "$ROOT_DIR/scripts/lib/configure-statusline.js" --command "$STATUSLINE_CMD"
+
 echo ""
-echo "  Add this entry to $HOME/.gemini/antigravity-cli/settings.json"
-echo "  (merge into the existing JSON object, then restart agy):"
-echo ""
+echo "[INFO] Statusline integration:"
+echo "  Target settings: $HOME/.gemini/antigravity-cli/settings.json"
 echo '  "statusLine": {'
 echo '    "type": "command",'
-echo '    "command": "agy-tokens --hook --raw --write-dashboard",'
+echo "    \"command\": \"$STATUSLINE_CMD\","
 echo '    "enabled": true,'
 echo '    "stack_with_default": true'
 echo '  }'
 echo ""
-echo "  - --write-dashboard refreshes the browser dashboard data on every state change."
-echo "  - Run \"agy-tokens --html\" once to generate the initial dashboard."
+echo "  - statusLine is now automatically configured in settings.json."
+echo "  - Restart Antigravity CLI (agy) to start seeing real-time token tracking."
+echo "  - For manual setup or troubleshooting, see README.md."
 echo ""
 
 echo "Try running:"

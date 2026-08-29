@@ -36,6 +36,7 @@ call npm link
 if %ERRORLEVEL% equ 0 (
     echo.
     echo [SUCCESS] agy-tools, agy-tokens, agy-dashboard, and antigravity-tools installed successfully!
+    set "STATUSLINE_CMD=agy-tokens --hook --raw --write-dashboard"
 ) else (
     echo.
     echo [WARN] npm link failed. Setting up fallback launchers...
@@ -56,28 +57,26 @@ if %ERRORLEVEL% equ 0 (
 
     echo [SUCCESS] Created launchers in !USER_BIN!
     echo Make sure !USER_BIN! is in your PATH.
+    set "STATUSLINE_CMD=node "%ROOT_DIR%\bin\agy-tokens.js" --hook --raw --write-dashboard"
 )
 
 echo.
-echo [INFO] Statusline integration (the ONLY integration point — agy itself is never modified):
+echo [INFO] Configuring Antigravity statusLine integration...
+node "%ROOT_DIR%\scripts\lib\configure-statusline.js" --command "!STATUSLINE_CMD!"
+
 echo.
-echo   Add this entry to %USERPROFILE%\.gemini\antigravity-cli\settings.json
-echo   (merge into the existing JSON object, then restart agy):
-echo.
+echo [INFO] Statusline integration:
+echo   Target settings: %USERPROFILE%\.gemini\antigravity-cli\settings.json
 echo   "statusLine": {
 echo     "type": "command",
-echo     "command": "agy-tokens --hook --raw --write-dashboard",
+echo     "command": "!STATUSLINE_CMD!",
 echo     "enabled": true,
 echo     "stack_with_default": true
 echo   }
 echo.
-echo   Windows 8.3 short-path alternative (if PATH is not inherited by subprocesses):
-echo   "command": "C:\\PROGRA~1\\nodejs\\node.exe %%APPDATA%%\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard"
-echo.
-echo   - Standard command "agy-tokens --hook --raw --write-dashboard" works when npm global bin or fallback bin is in PATH.
-echo   - If using 8.3 short paths, ensure backslashes are double-escaped (\\) for JSON.
-echo   - --write-dashboard refreshes the browser dashboard data on every state change.
-echo   - Run "agy-tokens --html" once to generate the initial dashboard.
+echo   - statusLine is now automatically configured in settings.json.
+echo   - Restart Antigravity CLI (agy) to start seeing real-time token tracking.
+echo   - For manual setup or troubleshooting, see README.md.
 echo.
 
 echo Try running:

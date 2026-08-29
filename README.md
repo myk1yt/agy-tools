@@ -68,9 +68,43 @@ flowchart TD
 
 ---
 
-## ⚡ Statusline Integration — The ONLY Integration Point
+## 📦 Quick Start & Installation
+
+Prerequisites: **Node.js 16+** ([nodejs.org](https://nodejs.org)) and **Antigravity CLI**
+
+### 1️⃣ One-Click Installation (Recommended)
+
+Run the following 3 commands in your terminal. This registers global commands **AND automatically configures the statusline (`statusLine`) hook in `settings.json`**:
+
+**Windows (Command Prompt / PowerShell):**
+```cmd
+git clone https://github.com/myk1yt/agy-tools.git
+cd agy-tools
+scripts\install.bat
+```
+
+**Linux / macOS:**
+```bash
+git clone https://github.com/myk1yt/agy-tools.git
+cd agy-tools
+chmod +x scripts/install.sh && ./scripts/install.sh
+```
+
+### 2️⃣ Getting Started
+1. **Restart Antigravity CLI (`agy`)**.
+2. Your terminal statusline will immediately display real-time token metrics and live Gemini quota pools!
+3. To open the real-time browser dashboard, click `📊 Dashboard` in your terminal statusline or run:
+```bash
+agy-tokens --html --open
+```
+
+---
+
+## ⚡ Statusline Integration & Architecture
 
 `agy-tokens` operates as a statusline-powered real-time token monitor. **No modification of Antigravity core files is required.**
+
+The installer script (`install.bat` / `install.sh`) automatically and safely merges the `statusLine` configuration into `~/.gemini/antigravity-cli/settings.json` (preserving your existing settings and creating automatic backups).
 
 ### Clean Statusline Format
 The statusline badge renders without redundant prefixes, keeping terminal output clean, dense, and informative:
@@ -85,9 +119,16 @@ The statusline badge renders without redundant prefixes, keeping terminal output
 ⚡ [Antigravity] 이번 턴: 1.2k (₩0.3) | 오늘 누적: 45.8k (₩9.9) | 캐시: 82% | 5h: ▰▰▰▰▱ 79% (4h 10m) | 7d: ▰▱▱▱▱ 21% (3d 20h) | 📊 대시보드
 ```
 
-### Configuration Setup
-Add the `statusLine` hook to `~/.gemini/antigravity-cli/settings.json`:
+- `--hook`: Formats output for Antigravity's `PostInvocation` statusline runner.
+- `--raw`: Strips JSON wrapper for direct terminal statusline display.
+- `--write-dashboard`: Atomically synchronizes real-time dashboard data on every turn.
 
+### 🔧 Manual Setup & Troubleshooting
+
+If you prefer manual configuration or operate in specialized container/PATH environments:
+
+#### Manual `settings.json` Configuration
+Add the `statusLine` hook to `~/.gemini/antigravity-cli/settings.json`:
 ```json
 {
   "statusLine": {
@@ -99,38 +140,9 @@ Add the `statusLine` hook to `~/.gemini/antigravity-cli/settings.json`:
 }
 ```
 
-- **Global command (Recommended)**: `"command": "agy-tokens --hook --raw --write-dashboard"` works seamlessly after `npm link` or installer script.
-- **Direct Node path**: `"command": "node /path/to/agy-tools/bin/agy-tokens.js --hook --raw --write-dashboard"` (do NOT enclose path in extra quotes).
-- **Windows 8.3 short paths** (if PATH is not inherited): `"command": "C:\\PROGRA~1\\nodejs\\node.exe %APPDATA%\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard"`
-
-- `--hook`: Formats output for Antigravity's `PostInvocation` statusline runner.
-- `--raw`: Strips JSON wrapper for direct terminal statusline display.
-- `--write-dashboard`: Atomically synchronizes real-time dashboard data on every turn.
-
----
-
-## 📦 Installation & Quick Start
-
-### Option 1: Global NPM Link (Recommended)
-
-```bash
-git clone https://github.com/myk1yt/agy-tools.git
-cd agy-tools
-npm link
-```
-
-### Option 2: One-Click Automated Scripts
-
-**Windows (Command Prompt / PowerShell):**
-```cmd
-scripts\install.bat
-```
-
-**Linux / macOS:**
-```bash
-chmod +x scripts/install.sh
-./scripts/install.sh
-```
+- **Direct Node path**: `"command": "node /path/to/agy-tools/bin/agy-tokens.js --hook --raw --write-dashboard"`
+- **Windows 8.3 short paths (if PATH is not inherited by subprocesses)**:
+  `"command": "C:\\PROGRA~1\\nodejs\\node.exe %APPDATA%\\npm\\NODE_M~1\\AGY-TO~1\\bin\\AGY-TO~1.JS --hook --raw --write-dashboard"` (ensure backslashes are escaped as `\\`)
 
 ---
 
