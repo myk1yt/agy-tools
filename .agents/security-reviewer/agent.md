@@ -5,7 +5,6 @@ mainAgent: true
 subagent: true
 hidden: false
 inheritMcp: false
-model: gemini-3.8-flash-high
 tools:
   - view_file
   - list_dir
