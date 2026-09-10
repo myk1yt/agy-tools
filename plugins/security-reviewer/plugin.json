@@ -1,0 +1,14 @@
+{
+    "version":  "1.0.0",
+    "name":  "security_reviewer",
+    "description":  "Enterprise Security Reviewer multi-agent suite based on EGC OWASP/CWE and GCP iam.securityReviewer patterns",
+    "author":  "k1yt",
+    "keywords":  [
+                     "antigravity",
+                     "security",
+                     "agents",
+                     "owasp",
+                     "iam"
+                 ],
+    "license":  "MIT"
+}
