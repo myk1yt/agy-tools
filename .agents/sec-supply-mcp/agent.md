@@ -10,6 +10,7 @@ tools:
   - list_dir
   - grep_search
   - find_by_name
+  - send_message
 ---
 
 # Supply Chain & MCP Runtime Inspector (`sec-supply-mcp`)

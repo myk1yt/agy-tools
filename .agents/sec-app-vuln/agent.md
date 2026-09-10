@@ -10,6 +10,7 @@ tools:
   - list_dir
   - grep_search
   - find_by_name
+  - send_message
 ---
 
 # Application Vulnerability Inspector (`sec-app-vuln`)
