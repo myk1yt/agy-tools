@@ -16,13 +16,11 @@ fi
 echo "Registering plugin via 'agy plugin install'..."
 agy plugin install "$PLUGIN_PATH"
 
-# 2. Deploy Skills Globally into ~/.gemini/config/skills and ~/.gemini/skills
+# 2. Deploy Skills Globally into ~/.gemini/config/skills
 GEMINI_DIR="${HOME}/.gemini"
 CONFIG_SKILLS_DIR="${GEMINI_DIR}/config/skills"
-USER_SKILLS_DIR="${GEMINI_DIR}/skills"
 
 mkdir -p "$CONFIG_SKILLS_DIR"
-mkdir -p "$USER_SKILLS_DIR"
 
 SOURCE_SKILLS_DIR="${PLUGIN_PATH}/skills"
 if [ -d "$SOURCE_SKILLS_DIR" ]; then
@@ -31,9 +29,7 @@ if [ -d "$SOURCE_SKILLS_DIR" ]; then
         if [ -d "$skill_dir" ] || [ -L "$skill_dir" ]; then
             skill_name="$(basename "$skill_dir")"
             rm -rf "${CONFIG_SKILLS_DIR:?}/${skill_name}"
-            rm -rf "${USER_SKILLS_DIR:?}/${skill_name}"
             cp -r "$skill_dir" "$CONFIG_SKILLS_DIR/"
-            cp -r "$skill_dir" "$USER_SKILLS_DIR/"
             echo "  + Deployed skill: $skill_name"
         fi
     done

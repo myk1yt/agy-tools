@@ -27,7 +27,7 @@ bash scripts/install-designer.sh
 
 > **What the installer does automatically**:
 > 1. Registers the `designer` plugin with Antigravity CLI via `agy plugin install`.
-> 2. Deploys all 5 modular design skills to `~/.gemini/config/skills` and `~/.gemini/skills`.
+> 2. Deploys all 5 modular design skills to `~/.gemini/config/skills`.
 > 3. Verifies agent registration via `agy agents`.
 
 ---
