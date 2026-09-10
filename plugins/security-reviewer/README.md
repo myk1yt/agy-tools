@@ -17,6 +17,9 @@ Open your terminal in the repository root directory and run the single command f
 powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1
 ```
 
+> 💡 **Beginner Tip (초보자 / 컴맹을 위한 팁)**:
+> In Windows File Explorer, press **Shift + Right-Click** in an empty area inside the repository folder and select **"Open PowerShell window here"** or **"Open in Terminal"**, then copy and paste the command above and press Enter.
+
 ### macOS / Linux (Terminal)
 ```bash
 bash scripts/install-security-reviewer.sh
