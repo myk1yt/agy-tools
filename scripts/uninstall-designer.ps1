@@ -11,9 +11,11 @@ try {
 }
 
 # 2. Clean up deployed skills from ~/.gemini/config/skills and ~/.gemini/skills
-$geminiDir = Join-Path $env:USERPROFILE ".gemini"
-$configSkillsDir = Join-Path $geminiDir "config\skills"
+$homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+$geminiDir = Join-Path $homeDir ".gemini"
+$configSkillsDir = Join-Path (Join-Path $geminiDir "config") "skills"
 $userSkillsDir = Join-Path $geminiDir "skills"
+$configPluginsDir = Join-Path (Join-Path $geminiDir "config") "plugins"
 
 $designerSkills = @(
     "design-core-harness",
@@ -36,6 +38,12 @@ foreach ($skill in $designerSkills) {
         Remove-Item -Path $targetUser -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "  - Removed skill: $targetUser" -ForegroundColor Yellow
     }
+}
+
+# Ensure plugin directory in config/plugins/designer is also cleaned up if left behind
+$targetPlugin = Join-Path $configPluginsDir "designer"
+if (Test-Path $targetPlugin) {
+    Remove-Item -Path $targetPlugin -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # 3. Verify Active Agents Registration
