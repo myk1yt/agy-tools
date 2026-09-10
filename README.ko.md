@@ -68,6 +68,131 @@ flowchart TD
 
 ---
 
+## 🌐 Agy-Tools 에코시스템 & 브랜치 카탈로그
+
+이 저장소는 토큰 추적기를 넘어 **Antigravity CLI**를 위한 개발자 도구, 에이전트 플러그인, 거버넌스 설정을 포함하는 통합 에코시스템입니다. 각 기능은 **독립 브랜치**로 관리되며, 필요한 모듈만 선택적으로 설치할 수 있습니다.
+
+```mermaid
+flowchart TD
+    Core["main\n코어 엔진 & 토큰 모니터"]
+    Des["Agent/designer\n@designer 플러그인"]
+    Sec["Agent/security-reviewer\n@security-reviewer 스위트"]
+    Gov["gemini-config\n자율 거버넌스 규칙"]
+    Dash["dashboard\n히스토리컬 프로토타입"]
+    
+    Core -->|플러그인| Des
+    Core -->|플러그인| Sec
+    Core -->|글로벌 설정| Gov
+    Dash -->|병합 및 대체| Core
+```
+
+| 브랜치 | 설명 | 주요 기능 | 빠른 시작 |
+|---|---|---|---|
+| [`main`](https://github.com/myk1yt/agy-tools/tree/main) | **코어 엔진 & 개발자 툴킷** | 상태줄 배지, SSE 웹 대시보드, 1:1 Gemini 쿼터 풀 RPC, 동적 단가 계산, 21개 언어 | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` |
+| [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) | **Zero-MCP 디자인 전문가** | `@designer` 에이전트, 5개 모듈형 스킬 (SVG, 3D 캔버스, 사이버펑크, 샌드박스, QA 하네스) | `git checkout Agent/designer && powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1` |
+| [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) | **엔터프라이즈 멀티 에이전트 보안 감사** | `@security-reviewer` 오케스트레이터 + 4개 도메인 인스펙터 (OWASP, IAM, 자격 증명, 공급망) | `git checkout Agent/security-reviewer && powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1` |
+| [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config) | **자율 멀티 에이전트 거버넌스** | 7단계 라이프사이클 프로토콜, Master Zero-Source-Edit 불변성, 오케스트레이터 스킬 | `git checkout gemini-config && scripts\install.bat` |
+| [`dashboard`](https://github.com/myk1yt/agy-tools/tree/dashboard) | **히스토리컬 프로토타입** | 최초 토큰 추적기 기반 (현재 `main`에 완전 병합됨) | — |
+
+> [!TIP]
+> 각 브랜치는 자체 **원클릭 설치/삭제 스크립트**를 제공합니다. 설치 전 `git checkout <브랜치>` 명령으로 해당 브랜치로 전환하세요.
+
+---
+
+## 🎨 에이전트 플러그인
+
+### `@designer` — Zero-MCP 자급형 디자인 전문가
+
+> **브랜치**: [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) · **작성자**: myk1yt · **버전**: 1.0.0
+
+Figma, Blender, 외부 MCP 도구 없이 순수 웹 표준(HTML5, CSS3, SVG, WebGL/GLSL)만으로 수학적으로 검증된 UI/UX 디자인, 인터랙티브 위젯, 3D 그래픽을 Antigravity 채팅 카드에 직접 생성하는 자율 디자인 에이전트입니다.
+
+**5개 번들 모듈형 스킬:**
+
+| 스킬 | 설명 |
+|---|---|
+| `design-core-harness` | Visual QA 검증 루프, 4차원 결함 체크리스트 (어센더 클리핑, z-index 충돌, 플레이스홀더 잔류, WCAG AAA 대비) |
+| `design-vector-svg` | 고정 680px 좌표 SVG 레이아웃 엔진, 문자 너비 공식, 9계열 4티어 컬러 매트릭스 |
+| `design-interactive-sandbox` | 인챗 실시간 인터랙티브 HTML sci-위젯, 파라미터 컨트롤, 60fps 캔버스 애니메이션 |
+| `design-3d-canvas` | WebGL 2.0 절차적 3D 지오메트리 및 GLSL 버텍스/프래그먼트 셰이더 (외부 의존성 없음) |
+| `design-cyberpunk-brainmap` | 사이버펑크 CRT 스캔라인 토폴로지 UI, DOM/SVG 신경 펄스 DAG 네트워크 |
+
+**설치 및 사용법:**
+```bash
+# 1. designer 브랜치로 전환
+git checkout Agent/designer
+
+# 2. 설치 (Windows PowerShell)
+powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1
+
+# 2. 설치 (Linux / macOS)
+bash scripts/install-designer.sh
+```
+
+Antigravity CLI에서 호출: `/agent` → `designer` 선택, 또는 `@designer`를 직접 호출하세요.
+
+---
+
+### `@security-reviewer` — 엔터프라이즈 멀티 에이전트 보안 감사 스위트
+
+> **브랜치**: [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) · **작성자**: myk1yt · **버전**: 1.0.0
+
+OWASP Top 10, CWE Top 25, Google Cloud `roles/iam.securityReviewer` 최소 권한 원칙을 기반으로 한 엔터프라이즈급 보안 감사 스위트입니다. 리드 오케스트레이터가 4개의 전문 도메인 인스펙터를 동시에 디스패치하여 종합적인 보안 감사를 수행합니다.
+
+**4개 도메인 인스펙터 서브에이전트:**
+
+| 서브에이전트 | 커버리지 |
+|---|---|
+| `sec-app-vuln` | OWASP Top 10 (2021) & CWE Top 25 — SQL Injection, XSS, Path Traversal, SSRF, Prompt Injection, ReDoS |
+| `sec-cloud-iam` | GCP IAM 최소 권한, Terraform/K8s/Dockerfile 보안, 방화벽 규칙 (`0.0.0.0/0`, `allUsers`) |
+| `sec-credential-scanner` | 하드코딩된 API 키, 비공개 인증서, JWT 토큰, `.env` 유출, PII 노출 탐지 |
+| `sec-supply-mcp` | 공급망 CVE, MCP 도구 권한 에스컬레이션, CORS/CSP 헤더 |
+
+**표준화된 감사 보고서:** 4파트 EGC 형식 — Philosophy Alignment → Scope → Consolidated Findings (Critical/High/Med/Low + 익스플로잇 PoC & 수정 diff) → Quality Gate Verdict (PASS / CONDITIONAL PASS / FAIL).
+
+**설치 및 사용법:**
+```bash
+# 1. security-reviewer 브랜치로 전환
+git checkout Agent/security-reviewer
+
+# 2. 설치 (Windows PowerShell)
+powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1
+
+# 2. 설치 (Linux / macOS)
+bash scripts/install-security-reviewer.sh
+```
+
+Antigravity CLI에서 호출: `/agent` → `security-reviewer` 선택, 또는 `@security-reviewer`를 직접 호출하세요.
+
+---
+
+## 📜 자율 멀티 에이전트 거버넌스 (`gemini-config`)
+
+> **브랜치**: [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config)
+
+**7단계 멀티 에이전트 라이프사이클 프로토콜**과 엔지니어링 거버넌스 규칙을 `~/.gemini` 디렉터리에 직접 프로비저닝하는 공유 가능한 글로벌 설정 번들입니다.
+
+**핵심 구성 요소:**
+- **`rules/AGENTS.md`**: Master Zero-Source-Edit & Zero-Monolithic-Execution 불변성, 7단계 라이프사이클 (`Intent → Decompose → Strategy → Adversarial Audit → SRP Plan → Worker Exec → Blind QA → Delivery`)
+- **`rules/GEMINI.md`**: 크로스 플랫폼, 무의존성 엔지니어링 표준
+- **`skills/autonomous-orchestrator`**: 멀티 에이전트 위임 및 이중 블라인드 QA 런북
+- **`skills/usage`**: 슬래시 명령 `/usage`를 통한 실시간 토큰 및 비용 분석
+- **`hooks/hooks.json`**: Antigravity PostInvocation 턴 배지 후크
+
+**설치:**
+```bash
+# 1. gemini-config 브랜치로 전환
+git checkout gemini-config
+
+# 2. 설치 (Windows)
+scripts\install.bat
+
+# 2. 설치 (Linux / macOS)
+chmod +x scripts/install.sh && ./scripts/install.sh
+```
+
+---
+
 ## 📦 초간단 설치 (Quick Start)
 
 사전 요구사항: **Node.js 16 이상** ([nodejs.org](https://nodejs.org)) 및 **Antigravity CLI**
