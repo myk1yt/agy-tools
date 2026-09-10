@@ -68,6 +68,131 @@ flowchart TD
 
 ---
 
+## 🌐 Agy-Tools Ecosystem & Branch Catalog
+
+This repository hosts a multi-faceted developer ecosystem beyond the core token tracker. Each major capability lives in its own dedicated branch:
+
+```mermaid
+flowchart TD
+    Core["main\nCore Engine & Token Monitor"]
+    Des["Agent/designer\n@designer Plugin"]
+    Sec["Agent/security-reviewer\n@security-reviewer Suite"]
+    Gov["gemini-config\nAutonomous Governance Rules"]
+    Dash["dashboard\nHistorical Prototype"]
+    
+    Core -->|Plugin| Des
+    Core -->|Plugin| Sec
+    Core -->|Global Config| Gov
+    Dash -->|Merged & Superseded| Core
+```
+
+| Branch | Description | Key Capabilities | Quick Start |
+|---|---|---|---|
+| [`main`](https://github.com/myk1yt/agy-tools/tree/main) | **Core Engine & Developer Toolkit** | Statusline badge, SSE Web Dashboard, 1:1 Gemini Quota Pool RPC, Dynamic Pricing, 21 languages | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` |
+| [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) | **Zero-MCP Design Specialist** | `@designer` agent, 5 modular skills (SVG, 3D Canvas, Cyberpunk, Sandbox, QA Harness) | `git checkout Agent/designer && powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1` |
+| [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) | **Enterprise Multi-Agent Security Audit** | `@security-reviewer` orchestrator + 4 domain inspectors (OWASP, IAM, Credentials, Supply Chain) | `git checkout Agent/security-reviewer && powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1` |
+| [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config) | **Autonomous Multi-Agent Governance** | 7-Stage Lifecycle Protocol, Master Zero-Source-Edit Invariant, orchestrator skills | `git checkout gemini-config && scripts\install.bat` |
+| [`dashboard`](https://github.com/myk1yt/agy-tools/tree/dashboard) | **Historical Prototype** | Original token tracker foundation (fully merged into `main`) | — |
+
+> [!TIP]
+> Each branch is self-contained with its own 1-click install/uninstall scripts. Switch branches with `git checkout <branch>` before running installers.
+
+---
+
+## 🎨 Agent Plugins
+
+### `@designer` — Zero-MCP Self-Contained Design Specialist
+
+> **Branch**: [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) · **Author**: myk1yt · **Version**: 1.0.0
+
+Autonomous design agent generating mathematically verified UI/UX designs, interactive widgets, and 3D graphics directly inside Antigravity chat — without Figma, Blender, or any external MCP tools.
+
+**5 Bundled Modular Skills:**
+
+| Skill | Description |
+|---|---|
+| `design-core-harness` | Visual QA verification loop with 4-dimension defect checklist (ascender clipping, z-index collision, placeholder retention, WCAG AAA contrast) |
+| `design-vector-svg` | Mathematically precise 680px SVG layout engine with character width formulas and 9-family 4-tier color matrix |
+| `design-interactive-sandbox` | Live in-chat HTML sci-widgets with real-time parameter controls and 60fps canvas animation |
+| `design-3d-canvas` | WebGL 2.0 procedural geometry and custom GLSL vertex/fragment shaders (toroid, geodesic) |
+| `design-cyberpunk-brainmap` | Cyberpunk CRT scanline topology UI with DOM/SVG neural pulse DAG networks |
+
+**Installation & Usage:**
+```bash
+# 1. Switch to designer branch
+git checkout Agent/designer
+
+# 2. Install (Windows PowerShell)
+powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1
+
+# 2. Install (Linux / macOS)
+bash scripts/install-designer.sh
+```
+
+Invoke in Antigravity CLI: `/agent` → select `designer`, or mention `@designer` directly.
+
+---
+
+### `@security-reviewer` — Enterprise Multi-Agent Security Audit Suite
+
+> **Branch**: [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) · **Author**: myk1yt · **Version**: 1.0.0
+
+Enterprise-grade security audit suite based on OWASP Top 10, CWE Top 25, and Google Cloud `roles/iam.securityReviewer` least-privilege principles. The lead orchestrator dispatches 4 specialized domain inspectors for comprehensive coverage.
+
+**4 Domain Inspector Subagents:**
+
+| Subagent | Coverage |
+|---|---|
+| `sec-app-vuln` | OWASP Top 10 (2021) & CWE Top 25 — SQL Injection, XSS, Path Traversal, SSRF, Prompt Injection, ReDoS |
+| `sec-cloud-iam` | GCP IAM least privilege, Terraform/K8s/Dockerfile security, firewall rules (`0.0.0.0/0`, `allUsers`) |
+| `sec-credential-scanner` | Hardcoded API keys, private certs, JWT tokens, `.env` leakage, PII exposure |
+| `sec-supply-mcp` | Supply chain CVEs, MCP tool privilege escalation, CORS/CSP headers |
+
+**Standardized Audit Report:** 4-part EGC format — Philosophy Alignment → Scope → Consolidated Findings (Critical/High/Med/Low with exploit PoCs & remediations) → Quality Gate Verdict (PASS / CONDITIONAL PASS / FAIL).
+
+**Installation & Usage:**
+```bash
+# 1. Switch to security-reviewer branch
+git checkout Agent/security-reviewer
+
+# 2. Install (Windows PowerShell)
+powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1
+
+# 2. Install (Linux / macOS)
+bash scripts/install-security-reviewer.sh
+```
+
+Invoke in Antigravity CLI: `/agent` → select `security-reviewer`, or mention `@security-reviewer` directly.
+
+---
+
+## 📜 Autonomous Multi-Agent Governance (`gemini-config`)
+
+> **Branch**: [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config)
+
+Shareable global configuration bundle that provisions the **7-Stage Multi-Agent Lifecycle Protocol** and engineering governance rules directly into your `~/.gemini` directory.
+
+**Core Components:**
+- **`rules/AGENTS.md`**: Master Zero-Source-Edit & Zero-Monolithic-Execution invariants, 7-Stage lifecycle (`Intent → Decompose → Strategy → Adversarial Audit → SRP Plan → Worker Exec → Blind QA → Delivery`)
+- **`rules/GEMINI.md`**: Cross-platform, zero-dependency engineering standards
+- **`skills/autonomous-orchestrator`**: Multi-agent delegation and double-blind QA runbook
+- **`skills/usage`**: Slash command `/usage` for instant token and cost analytics
+- **`hooks/hooks.json`**: Antigravity PostInvocation turn badge hook
+
+**Installation:**
+```bash
+# 1. Switch to gemini-config branch
+git checkout gemini-config
+
+# 2. Install (Windows)
+scripts\install.bat
+
+# 2. Install (Linux / macOS)
+chmod +x scripts/install.sh && ./scripts/install.sh
+```
+
+---
+
 ## 📦 Quick Start & Installation
 
 Prerequisites: **Node.js 16+** ([nodejs.org](https://nodejs.org)) and **Antigravity CLI**
