@@ -1050,7 +1050,11 @@ async function runAllTests() {
         'usd'
       );
 
-      assert(badgeStr.includes('⚡ [Antigravity]'));
+      assert(badgeStr.includes('⚡'));
+      assert(!badgeStr.includes('[Antigravity]'), 'Badge must not contain the [Antigravity] label (REQ-2)');
+      assert(formatter.stripAnsi(badgeStr).startsWith('⚡'), 'Badge must start with the ⚡ emoji (REQ-2)');
+      assert(formatter.stripAnsi(badgeStr).startsWith('⚡ '));
+      assert(formatter.stripAnsi(badgeStr).includes(`⚡ ${i18n.t('hookBadgeTurn')}:`), 'Badge must read "⚡ Turn:" right after the emoji (REQ-2)');
       assert(badgeStr.includes('2.1k'));
       assert(badgeStr.includes('85.0k'));
       assert(badgeStr.includes('75%'));
@@ -1069,15 +1073,17 @@ async function runAllTests() {
         true
       );
 
-      assert(badgeStr.includes('⚡ [Antigravity]'));
+      assert(badgeStr.includes('⚡'));
+      assert(!badgeStr.includes('[Antigravity]'), 'Free-mode badge must not contain the [Antigravity] label (REQ-2)');
+      assert(formatter.stripAnsi(badgeStr).startsWith('⚡'), 'Free-mode badge must start with the ⚡ emoji (REQ-2)');
       assert(badgeStr.includes('Free'));
     });
 
     await test('Should format hook response matching Antigravity PostInvocation schema', () => {
-      const resp = hookHandler.formatHookResponse('⚡ [Antigravity] Turn: 1.2k | Today: 45k');
+      const resp = hookHandler.formatHookResponse('⚡ Turn: 1.2k | Today: 45k');
       assert(resp && Array.isArray(resp.injectSteps), 'Must have injectSteps array');
       assert.strictEqual(resp.injectSteps.length, 1);
-      assert.strictEqual(resp.injectSteps[0].ephemeralMessage, '⚡ [Antigravity] Turn: 1.2k | Today: 45k');
+      assert.strictEqual(resp.injectSteps[0].ephemeralMessage, '⚡ Turn: 1.2k | Today: 45k');
     });
 
     await test('handlePostInvocation should return structured payload including injectSteps', async () => {
@@ -2505,11 +2511,16 @@ async function runAllTests() {
         const q5h = i18n.t('quota5h') || '5h';
         const q7d = i18n.t('quota7d') || '7d';
         for (const needle of [
-          '[Antigravity]', `${i18nTurn}:`, `${i18nToday}:`, `${i18nCache}:`,
+          '⚡', `${i18nTurn}:`, `${i18nToday}:`, `${i18nCache}:`,
           `${q5h}:`, `${q7d}:`, '2.1k', '850.0k', '75%', '80%', '50%', '📊 Dashboard'
         ]) {
           assert(plain.includes(needle), `Wrapped badge lost segment content '${needle}': ${JSON.stringify(plain)}`);
         }
+        // REQ-2: the removed [Antigravity] label must not resurrect through the wrap path.
+        assert(!plain.includes('[Antigravity]'), `Wrapped badge must not contain [Antigravity] (REQ-2): ${JSON.stringify(plain)}`);
+        const plainVisible = formatter.stripAnsi(plain);
+        assert(plainVisible.startsWith('⚡'), `Wrapped line 1 must start with the ⚡ emoji (REQ-2): ${JSON.stringify(plainVisible)}`);
+        assert(plainVisible.startsWith('⚡ '), `Wrapped line 1 must read "⚡ " then the turn label (REQ-2): ${JSON.stringify(plainVisible)}`);
         // OSC 8 framing itself must survive the wrap untouched.
         assert(badge.includes('\x1b]8;;file:///C:/Users/test/dashboard.html\x07'), 'OSC 8 open sequence must be intact');
         assert(badge.includes('\x1b]8;;\x07'), 'OSC 8 close sequence must be intact');

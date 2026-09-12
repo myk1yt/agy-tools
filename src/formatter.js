@@ -793,7 +793,7 @@ function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, li
   const cacheHit = `${(badgeData.cacheHitRate || 0).toFixed(0)}%`;
 
   const segments = [
-    `${styleText('⚡ [Antigravity]', 'brightCyan')} ` +
+    `${styleText('⚡', 'brightCyan')} ` +
     `${t('hookBadgeTurn')}: ${styleText(turnTok, 'white')} (${styleText(turnCost, 'green')})`,
     `${t('hookBadgeToday')}: ${styleText(todayTok, 'brightYellow')} (${styleText(todayCost, 'brightGreen')})`,
     `${t('hookBadgeCache')}: ${styleText(cacheHit, 'cyan')}`
