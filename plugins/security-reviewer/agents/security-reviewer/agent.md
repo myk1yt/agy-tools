@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Lead Security Reviewer orchestrating specialized domain subagents for pre-commit audits: OWASP/CWE, Secrets/Credentials, Cloud/IaC, and Antigravity MCP privileges.
+description: Lead Security Reviewer orchestrating specialized domain subagents for pre-commit audits (OWASP/CWE, Secrets/Credentials, Cloud/IaC, and Antigravity MCP privileges).
 mainAgent: true
 subagent: true
 hidden: false

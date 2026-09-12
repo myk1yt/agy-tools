@@ -89,9 +89,9 @@ flowchart TD
 | Branch | Description | Key Capabilities | Quick Start |
 |---|---|---|---|
 | [`main`](https://github.com/myk1yt/agy-tools/tree/main) | **Core Engine & Developer Toolkit** | Statusline badge, SSE Web Dashboard, 1:1 Gemini Quota Pool RPC, Dynamic Pricing, 21 languages | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` |
-| [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) | **Zero-MCP Design Specialist** | `@designer` agent, 5 modular skills (SVG, 3D Canvas, Cyberpunk, Sandbox, QA Harness) | `git checkout Agent/designer && powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1` |
+| [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) | **Zero-MCP Design Specialist** | `@designer` agent, 5 modular add-on modules (SVG, 3D Canvas, Cyberpunk, Sandbox, QA Harness) | `git checkout Agent/designer && powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1` |
 | [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) | **Enterprise Multi-Agent Security Audit** | `@security-reviewer` orchestrator + 4 domain inspectors (OWASP, IAM, Credentials, Supply Chain) | `git checkout Agent/security-reviewer && powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1` |
-| [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config) | **Autonomous Multi-Agent Governance** | 7-Stage Lifecycle Protocol, Master Zero-Source-Edit Invariant, orchestrator skills | `git checkout gemini-config && scripts\install.bat` |
+| [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config) | **Autonomous Multi-Agent Governance** | 7-Stage Lifecycle Protocol, Master Zero-Source-Edit Invariant, orchestrator governance | `git checkout gemini-config && scripts\install.bat` |
 | [`dashboard`](https://github.com/myk1yt/agy-tools/tree/dashboard) | **Historical Prototype** | Original token tracker foundation (fully merged into `main`) | — |
 
 > [!TIP]
@@ -107,9 +107,9 @@ flowchart TD
 
 Autonomous design agent generating mathematically verified UI/UX designs, interactive widgets, and 3D graphics directly inside Antigravity chat — without Figma, Blender, or any external MCP tools.
 
-**5 Bundled Modular Skills:**
+**5 Bundled Modular Capabilities:**
 
-| Skill | Description |
+| Capability | Description |
 |---|---|
 | `design-core-harness` | Visual QA verification loop with 4-dimension defect checklist (ascender clipping, z-index collision, placeholder retention, WCAG AAA contrast) |
 | `design-vector-svg` | Mathematically precise 680px SVG layout engine with character width formulas and 9-family 4-tier color matrix |
@@ -175,9 +175,9 @@ Shareable global configuration bundle that provisions the **7-Stage Multi-Agent 
 **Core Components:**
 - **`rules/AGENTS.md`**: Master Zero-Source-Edit & Zero-Monolithic-Execution invariants, 7-Stage lifecycle (`Intent → Decompose → Strategy → Adversarial Audit → SRP Plan → Worker Exec → Blind QA → Delivery`)
 - **`rules/GEMINI.md`**: Cross-platform, zero-dependency engineering standards
-- **`skills/autonomous-orchestrator`**: Multi-agent delegation and double-blind QA runbook
-- **`skills/usage`**: Slash command `/usage` for instant token and cost analytics
-- **`hooks/hooks.json`**: Antigravity PostInvocation turn badge hook
+- **`config/agents`**: Multi-agent delegation and double-blind QA runbook (Markdown agents)
+- **`config/agents`**: Instant token and cost analytics via the statusline `agy-tokens --hook --raw --write-dashboard` badge
+- **`config/statusLine` in `settings.json`**: Antigravity statusline turn badge (single integration point)
 
 **Installation:**
 ```bash
