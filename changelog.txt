@@ -2,6 +2,63 @@
 Antigravity-cli (agy-tools) Changelog
 ================================================================================
 
+Version: 0.10.3
+Release Date: 2026-09-12
+Previous Version: 0.10.2
+
+--------------------------------------------------------------------------------
+[Overview]
+--------------------------------------------------------------------------------
+This release permanently eliminates the Go Language Server TLS handshake error
+("client sent an HTTP request to an HTTPS server") in src/gemini-quota.js.
+Previously, when the Language Server was running on an HTTPS endpoint without
+a CSRF token or when an RPC call returned an authentication failure (HTTP 401),
+fetchLiveGeminiQuota attempted a plaintext HTTP fallback on the same port,
+triggering Go Language Server TLS handshake errors in the console.
+In this release:
+1. When candidate ports respond over HTTPS (or TLS handshake succeeds),
+   plaintext HTTP fallback is strictly blocked and the protocols loop breaks
+   immediately for that port.
+2. When no CSRF token is available (!csrfToken), unauthenticated Language Server
+   RPC calls are gracefully skipped, preventing futile network requests, 401 logs,
+   and TLS handshake issues while preserving honest fallback diagnostics.
+
+--------------------------------------------------------------------------------
+[Detailed Changes & Differences from 0.10.2]
+--------------------------------------------------------------------------------
+
+1. HTTPS Port Fallback Protection (src/gemini-quota.js)
+   - Introduced confirmed HTTPS port detection (_detectedHttpsPorts):
+     * When any response is received over HTTPS or socket.once('secureConnect')
+       fires, the port is marked as HTTPS.
+     * When proto === 'https' completes with an HTTPS response (whether 200, 401,
+       403, or any HTTP status code) or TLS handshake succeeded, the protocols
+       loop immediately breaks for that candidate port. Plaintext HTTP fallback
+       is never attempted on confirmed HTTPS ports.
+     * makeRpcRequest guards against plaintext HTTP calls to confirmed HTTPS ports,
+       immediately rejecting with ERR_HTTP_BLOCKED_ON_HTTPS without socket emission.
+
+2. Graceful Unauthenticated Probe Skip (src/gemini-quota.js)
+   - When !csrfToken (no CSRF token found in CLI args or environment variables),
+     unauthenticated Language Server RPC calls are gracefully skipped.
+   - Sets auth failure diagnostics ('HTTP 401 (missing CSRF token)') without
+     sending zero-benefit network requests that are guaranteed to fail with 401.
+
+3. Test Suite Expansion (test/run-tests.js)
+   - Added unit test: fetchLiveGeminiQuota should NEVER attempt plaintext HTTP
+     fallback on a port that responded via HTTPS (asserts 0 clientError/TLS errors).
+   - Added unit test: fetchLiveGeminiQuota should gracefully skip unauthenticated
+     RPC probe when csrfToken is missing (asserts 0 requests made, clean auth_failure).
+   - Test suite pass rate: 210 passed, 0 failed (100% pass rate).
+
+4. Version Bump (package.json)
+   - Bumped version to 0.10.3.
+
+5. Zero External Dependency Invariant
+   - Built purely with Node.js standard built-ins (http, https, crypto, child_process, fs, path).
+
+--------------------------------------------------------------------------------
+
 Version: 0.10.2
 Release Date: 2026-09-12
 Previous Version: 0.10.1

@@ -23,6 +23,10 @@ const HTTP_TIMEOUT_MS = 2500;
 let _lastBackgroundTriggerAt = 0;
 const BACKGROUND_TRIGGER_THROTTLE_MS = 10000;
 
+// Confirmed HTTPS ports set: ports where TLS handshake succeeded or an HTTP response was received over HTTPS.
+// Plaintext HTTP requests must NEVER be sent to ports in this set to avoid Go Language Server TLS handshake errors.
+const _detectedHttpsPorts = new Set();
+
 // TLS-handshake flood guard (FY-2026-09-12-001): when the Language Server is
 // NOT running, discovery keeps probing loopback ports every statusline render
 // and each plain-HTTP fallback probe makes the local HTTPS-only Go server
@@ -485,6 +489,12 @@ function makeRpcRequest({
 }) {
   return new Promise((resolve, reject) => {
     const isHttps = String(protocol).toLowerCase() === 'https';
+    if (!isHttps && _detectedHttpsPorts.has(port)) {
+      const blockedErr = new Error(`Plaintext HTTP request blocked: port ${port} is confirmed HTTPS endpoint`);
+      blockedErr.code = 'ERR_HTTP_BLOCKED_ON_HTTPS';
+      return reject(blockedErr);
+    }
+
     const client = isHttps ? https : http;
     const postData = JSON.stringify({});
 
@@ -506,7 +516,13 @@ function makeRpcRequest({
       reqOptions.rejectUnauthorized = rejectUnauthorized;
     }
 
+    let tlsHandshakeSucceeded = false;
+
     const req = client.request(reqOptions, (res) => {
+      if (isHttps) {
+        tlsHandshakeSucceeded = true;
+        _detectedHttpsPorts.add(port);
+      }
       let data = '';
       res.setEncoding('utf8');
       res.on('data', chunk => { data += chunk; });
@@ -516,7 +532,10 @@ function makeRpcRequest({
             const parsed = JSON.parse(data);
             resolve(parsed);
           } catch (e) {
-            reject(new Error(`Failed to parse ${rpcPath} response JSON: ${e.message}`));
+            const parseErr = new Error(`Failed to parse ${rpcPath} response JSON: ${e.message}`);
+            parseErr.httpStatus = res.statusCode;
+            if (isHttps) parseErr.tlsHandshakeSucceeded = true;
+            reject(parseErr);
           }
         } else {
           const httpErr = new Error(`${rpcPath} returned HTTP ${res.statusCode}: ${data}`);
@@ -524,12 +543,28 @@ function makeRpcRequest({
           // authentication rejection (401 — server alive, CSRF token missing/
           // invalid) from a genuine "no server" negative probe.
           httpErr.httpStatus = res.statusCode;
+          if (isHttps) httpErr.tlsHandshakeSucceeded = true;
           reject(httpErr);
         }
       });
     });
 
+    if (isHttps) {
+      req.on('socket', (socket) => {
+        socket.once('secureConnect', () => {
+          tlsHandshakeSucceeded = true;
+          _detectedHttpsPorts.add(port);
+        });
+      });
+    }
+
     req.on('error', (err) => {
+      if (tlsHandshakeSucceeded) {
+        err.tlsHandshakeSucceeded = true;
+        _detectedHttpsPorts.add(port);
+      } else if (isHttps) {
+        _detectedHttpsPorts.delete(port);
+      }
       reject(err);
     });
 
@@ -1040,12 +1075,25 @@ async function fetchLiveGeminiQuota(opts = {}) {
       protocols = ['https', 'http'];
     }
 
+    // Fallback to environment variables when not specified in command line or opts
+    if (!csrfToken) {
+      if (process.env.ANTIGRAVITY_CSRF_TOKEN && typeof process.env.ANTIGRAVITY_CSRF_TOKEN === 'string') {
+        const t = process.env.ANTIGRAVITY_CSRF_TOKEN.trim();
+        if (t) csrfToken = t;
+      }
+      if (!csrfToken && process.env.CSRF_TOKEN && typeof process.env.CSRF_TOKEN === 'string') {
+        const t = process.env.CSRF_TOKEN.trim();
+        if (t) csrfToken = t;
+      }
+    }
+
     const rejectUnauthorized = opts.rejectUnauthorized !== undefined ? opts.rejectUnauthorized : false;
     let quota = null;
     // REQ-3 Fix 1: classify 401 (auth) failures separately from transport
     // errors so the cooldown marker records WHY live fetch keeps failing.
     let sawAuthFailure = false;
     let authFailureDetail = null;
+    const hasValidCsrf = Boolean(csrfToken && typeof csrfToken === 'string' && csrfToken.trim());
 
     if (typeof opts.fetcher === 'function') {
       const data = await opts.fetcher({
@@ -1054,10 +1102,22 @@ async function fetchLiveGeminiQuota(opts = {}) {
         protocol: protocols[0]
       });
       quota = extractGeminiQuotaFromPayload(data, refDate);
+    } else if (!hasValidCsrf) {
+      // Unauthenticated probe skip: Go Language Server strictly rejects requests
+      // without CSRF token ('missing CSRF token' / HTTP 401). Skip unauthenticated
+      // RPC calls to eliminate pointless network noise and prevent handshake issues.
+      sawAuthFailure = true;
+      authFailureDetail = 'HTTP 401 (missing CSRF token)';
     } else {
       outerLoop:
       for (const p of candidatePorts) {
+        let portIsHttps = false;
         for (const proto of protocols) {
+          if (proto === 'http' && (portIsHttps || _detectedHttpsPorts.has(p))) {
+            // NEVER attempt plaintext HTTP on a port that already responded over HTTPS
+            break;
+          }
+
           // 1. Try RetrieveUserQuotaSummary
           try {
             const summaryData = await callRetrieveUserQuotaSummary({
@@ -1068,9 +1128,22 @@ async function fetchLiveGeminiQuota(opts = {}) {
               timeoutMs: opts.timeoutMs,
               rejectUnauthorized
             });
+            if (proto === 'https') {
+              portIsHttps = true;
+              _detectedHttpsPorts.add(p);
+            }
             quota = extractGeminiQuotaFromPayload(summaryData, refDate);
             if (quota) break outerLoop;
           } catch (summaryErr) {
+            if (proto === 'https') {
+              if (summaryErr?.httpStatus !== undefined || summaryErr?.tlsHandshakeSucceeded) {
+                portIsHttps = true;
+                _detectedHttpsPorts.add(p);
+              } else {
+                portIsHttps = false;
+                _detectedHttpsPorts.delete(p);
+              }
+            }
             if (summaryErr && summaryErr.httpStatus === 401) {
               sawAuthFailure = true;
               authFailureDetail = authFailureDetail || String(summaryErr.message || '').slice(0, 300);
@@ -1089,15 +1162,33 @@ async function fetchLiveGeminiQuota(opts = {}) {
                 timeoutMs: opts.timeoutMs,
                 rejectUnauthorized
               });
+              if (proto === 'https') {
+                portIsHttps = true;
+                _detectedHttpsPorts.add(p);
+              }
               quota = extractGeminiQuotaFromPayload(statusData, refDate);
               if (quota) break outerLoop;
             } catch (statusErr) {
+              if (proto === 'https') {
+                if (statusErr?.httpStatus !== undefined || statusErr?.tlsHandshakeSucceeded) {
+                  portIsHttps = true;
+                  _detectedHttpsPorts.add(p);
+                } else if (!portIsHttps) {
+                  _detectedHttpsPorts.delete(p);
+                }
+              }
               if (statusErr && statusErr.httpStatus === 401) {
                 sawAuthFailure = true;
                 authFailureDetail = authFailureDetail || String(statusErr.message || '').slice(0, 300);
               }
               // Try next protocol / port
             }
+          }
+
+          if (proto === 'https' && (portIsHttps || _detectedHttpsPorts.has(p))) {
+            // Port responded via HTTPS (whether 200, 401, 403, or any HTTP status code),
+            // or TLS handshake succeeded. DO NOT attempt plaintext HTTP on that port!
+            break;
           }
         }
       }
@@ -1197,6 +1288,21 @@ async function getGeminiQuota(opts = {}) {
   return null;
 }
 
+/**
+ * Clears the set of detected HTTPS ports (useful for test isolation).
+ */
+function clearDetectedHttpsPorts() {
+  _detectedHttpsPorts.clear();
+}
+
+/**
+ * Returns array of detected HTTPS ports.
+ * @returns {Array<number>}
+ */
+function getDetectedHttpsPorts() {
+  return Array.from(_detectedHttpsPorts);
+}
+
 module.exports = {
   GEMINI_QUOTA_CACHE_FILE,
   CACHE_TTL_MS,
@@ -1210,6 +1316,8 @@ module.exports = {
   recordQuotaAttemptFailure,
   writeProbeCooldown,
   clearProbeCooldown,
+  clearDetectedHttpsPorts,
+  getDetectedHttpsPorts,
   formatCountdownDuration,
   formatResetTime,
   parseCommandLine,

@@ -4356,6 +4356,125 @@ async function runAllTests() {
         if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
       }
     });
+
+    await test('fetchLiveGeminiQuota should NEVER attempt plaintext HTTP fallback on a port that responded via HTTPS', async () => {
+      const { certPem, privateKey } = createTestCert();
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-quota-https-guard-'));
+      const testCacheFile = path.join(tempDir, 'quota_cache_guard.json');
+
+      const clientErrors = [];
+      let requestCount = 0;
+      const httpsServer = https.createServer({ key: privateKey, cert: certPem }, (req, res) => {
+        requestCount++;
+        // Simulate Language Server rejecting invalid token with 401
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: 'unauthenticated', message: 'invalid or expired token' }));
+      });
+
+      httpsServer.on('clientError', (err) => {
+        clientErrors.push(err);
+      });
+
+      await new Promise(r => httpsServer.listen(0, '127.0.0.1', r));
+      const httpsPort = httpsServer.address().port;
+
+      try {
+        const res = await geminiQuota.fetchLiveGeminiQuota({
+          port: httpsPort,
+          csrfToken: 'expired-token',
+          protocols: ['https', 'http'],
+          cachePath: testCacheFile
+        });
+
+        assert.strictEqual(res.isLive, false);
+        assert.strictEqual(res.errorKind, 'auth_failure');
+        assert(String(res.error).includes('401'));
+
+        // Crucial invariant: clientErrors MUST be 0!
+        // If fetchLiveGeminiQuota attempted plaintext HTTP fallback on httpsPort,
+        // Node's httpsServer would emit clientError (ERR_SSL_WRONG_VERSION_NUMBER / Parse Error)
+        assert.strictEqual(clientErrors.length, 0, 'No TLS handshake errors or clientError must occur from plaintext HTTP probe on HTTPS server');
+
+        // Port must be recorded in detected HTTPS ports
+        const detected = geminiQuota.getDetectedHttpsPorts();
+        assert(detected.includes(httpsPort), 'httpsPort must be detected as HTTPS');
+
+        // makeRpcRequest must block plaintext HTTP to this port
+        await assert.rejects(
+          async () => {
+            await geminiQuota.makeRpcRequest({
+              path: '/test',
+              port: httpsPort,
+              protocol: 'http'
+            });
+          },
+          /Plaintext HTTP request blocked/
+        );
+      } finally {
+        await new Promise(r => httpsServer.close(r));
+        geminiQuota.clearDetectedHttpsPorts();
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('fetchLiveGeminiQuota should gracefully skip unauthenticated RPC probe when csrfToken is missing', async () => {
+      const { certPem, privateKey } = createTestCert();
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-quota-unauth-'));
+      const testCacheFile = path.join(tempDir, 'quota_cache_unauth.json');
+
+      let requestsReceived = 0;
+      const clientErrors = [];
+      const httpsServer = https.createServer({ key: privateKey, cert: certPem }, (req, res) => {
+        requestsReceived++;
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: 'unauthenticated', message: 'missing CSRF token' }));
+      });
+
+      httpsServer.on('clientError', (err) => {
+        clientErrors.push(err);
+      });
+
+      await new Promise(r => httpsServer.listen(0, '127.0.0.1', r));
+      const httpsPort = httpsServer.address().port;
+
+      fs.writeFileSync(testCacheFile, JSON.stringify({
+        version: 2,
+        timestampMs: Date.now() - 60000,
+        remainPercent: 90
+      }), 'utf8');
+
+      const origAgyCsrf = process.env.ANTIGRAVITY_CSRF_TOKEN;
+      const origCsrf = process.env.CSRF_TOKEN;
+      delete process.env.ANTIGRAVITY_CSRF_TOKEN;
+      delete process.env.CSRF_TOKEN;
+
+      try {
+        const res = await geminiQuota.fetchLiveGeminiQuota({
+          port: httpsPort,
+          csrfToken: '',
+          cachePath: testCacheFile
+        });
+
+        // Zero requests should have reached the server
+        assert.strictEqual(requestsReceived, 0, 'Zero requests must be made when CSRF token is missing');
+        assert.strictEqual(clientErrors.length, 0, 'Zero client/TLS handshake errors');
+        assert.strictEqual(res.isLive, false);
+        assert.strictEqual(res.errorKind, 'auth_failure');
+        assert(String(res.error).includes('401'));
+        assert(String(res.error).includes('missing CSRF token'));
+
+        // Cache diagnostics must record the auth failure
+        const cached = JSON.parse(fs.readFileSync(testCacheFile, 'utf8'));
+        assert.strictEqual(cached.lastError.kind, 'auth_failure');
+        assert(cached.lastError.detail.includes('missing CSRF token'));
+      } finally {
+        if (origAgyCsrf !== undefined) process.env.ANTIGRAVITY_CSRF_TOKEN = origAgyCsrf;
+        if (origCsrf !== undefined) process.env.CSRF_TOKEN = origCsrf;
+        await new Promise(r => httpsServer.close(r));
+        geminiQuota.clearDetectedHttpsPorts();
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 
   // --- Suite 25: Cross-Platform Installer Scripts Unit Tests ---
