@@ -31,6 +31,54 @@ const BACKGROUND_TRIGGER_THROTTLE_MS = 10000;
 // happens per cooldown window. Cleared automatically when a probe succeeds.
 const PROBE_COOLDOWN_MARKER = path.join(config.GEMINI_DIR, 'gemini_quota_probe_cooldown.json');
 const PROBE_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
+// REQ-3 Fix 3: bounded retry even while a probe cooldown is active. When the
+// on-disk quota snapshot grows older than this AND we have not actually
+// attempted a live fetch within this window, allow ONE retry so a transiently
+// recovered Language Server (or a fixed CSRF source) can refresh the cache
+// without waiting out the full negative-probe cooldown. This is deliberately
+// longer than the 30s freshness TTL and shorter than the 10m cooldown so a
+// permanently-broken auth path only produces one discovery burst per window
+// (no TLS-handshake flood), while the statusline still shows an honest stale
+// marker in between.
+const STALE_RETRY_AFTER_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Reads the snapshot age basis (`timestampMs`) from the quota cache file.
+ * Returns null when the cache is missing/unreadable (no snapshot to defend).
+ * @param {string} cachePath
+ * @returns {number|null}
+ */
+function readQuotaSnapshotTimestamp(cachePath) {
+  try {
+    if (!fs.existsSync(cachePath)) return null;
+    const data = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+    if (!data || typeof data.timestampMs !== 'number' || isNaN(data.timestampMs)) return null;
+    return data.timestampMs;
+  } catch (_err) {
+    return null;
+  }
+}
+
+/**
+ * REQ-3 Fix 3 cooldown gate decision (pure function, unit-testable):
+ * a probe cooldown marker should be BYPASSED (one retry allowed) when the
+ * cached snapshot is older than STALE_RETRY_AFTER_MS and the marker itself
+ * is at least as old, bounding retry bursts to <= one per 5 minutes.
+ * No cache snapshot => no user-visible staleness => never bypass.
+ * @param {number|null} snapshotMs - cache timestampMs (null when no cache).
+ * @param {number} markerSetAtMs - cooldown marker setAtMs.
+ * @param {number} [nowMs=Date.now()]
+ * @param {number} [staleRetryAfterMs=STALE_RETRY_AFTER_MS]
+ * @returns {boolean}
+ */
+function shouldBypassCooldownForStale(snapshotMs, markerSetAtMs, nowMs = Date.now(), staleRetryAfterMs = STALE_RETRY_AFTER_MS) {
+  if (typeof snapshotMs !== 'number' || typeof markerSetAtMs !== 'number') return false;
+  if (snapshotMs <= 0 || markerSetAtMs <= 0) return false;
+  if (nowMs - snapshotMs <= staleRetryAfterMs) return false;
+  if (nowMs - markerSetAtMs < staleRetryAfterMs) return false;
+  return true;
+}
 /**
  * Reads the persisted negative-probe cooldown marker.
  * @param {string} [markerPath=PROBE_COOLDOWN_MARKER] - Marker file path override (test hook).
@@ -54,19 +102,93 @@ function readProbeCooldown(markerPath = PROBE_COOLDOWN_MARKER) {
 }
 
 /**
- * Writes the persisted negative-probe cooldown marker and stamps the in-process throttle.
+ * Reads the full persisted cooldown marker object (REQ-3 Fix 1 diagnostics).
+ * Unlike readProbeCooldown this never deletes an expired marker; it just
+ * returns null when absent/expired/unreadable. Backward compatible with
+ * version-1 markers (missing `reason`/`detail`/`tokenSource` fields tolerated).
+ * @param {string} [markerPath=PROBE_COOLDOWN_MARKER] - Marker file path override (test hook).
+ * @returns {{version:number,reason:string,detail:string|null,tokenSource:string|null,setAtMs:number,expiryMs:number}|null}
+ */
+function readProbeCooldownInfo(markerPath = PROBE_COOLDOWN_MARKER) {
+  try {
+    if (!fs.existsSync(markerPath)) return null;
+    const raw = fs.readFileSync(markerPath, 'utf8');
+    const data = JSON.parse(raw);
+    if (!data || typeof data.expiryMs !== 'number' || isNaN(data.expiryMs)) return null;
+    if (Date.now() >= data.expiryMs) return null;
+    return {
+      version: typeof data.version === 'number' ? data.version : 1,
+      reason: typeof data.reason === 'string' ? data.reason : 'language_server_probe_failed',
+      detail: typeof data.detail === 'string' ? data.detail : null,
+      tokenSource: typeof data.tokenSource === 'string' ? data.tokenSource : null,
+      setAtMs: typeof data.setAtMs === 'number' ? data.setAtMs : 0,
+      expiryMs: data.expiryMs
+    };
+  } catch (_err) {
+    return null;
+  }
+}
+
+/**
+ * REQ-3 Fix 3: records the latest live-fetch attempt outcome INTO the quota
+ * cache file without touching `timestampMs` (the snapshot-age invariant the
+ * stale marker relies on). Adds `lastAttemptAtMs` and `lastError` diagnostic
+ * fields; both are tolerated as absent by older readers (backward compatible).
+ * No-op when the cache file does not exist (nothing to decorate, and creating
+ * a data-less cache would change the null-cache behavior contract).
+ * @param {object} info
+ * @param {string} info.errorKind - 'auth_failure' | 'probe_failed' | 'exception'.
+ * @param {string} [info.errorDetail] - Short sanitized detail (no secrets/tokens).
+ * @param {string} [cachePath=GEMINI_QUOTA_CACHE_FILE] - Cache file path override (test hook).
+ * @returns {boolean} Whether the cache was updated.
+ */
+function recordQuotaAttemptFailure(info = {}, cachePath = GEMINI_QUOTA_CACHE_FILE) {
+  try {
+    if (!fs.existsSync(cachePath)) return false;
+    const data = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+    data.lastAttemptAtMs = Date.now();
+    data.lastError = {
+      kind: info.errorKind || 'exception',
+      detail: typeof info.errorDetail === 'string' ? info.errorDetail.slice(0, 300) : null
+    };
+    const content = JSON.stringify(data, null, 2);
+    const tmp = `${cachePath}.${Date.now()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, content, 'utf8');
+    try {
+      fs.renameSync(tmp, cachePath);
+    } catch (_e) {
+      fs.writeFileSync(cachePath, content, 'utf8');
+      try { fs.unlinkSync(tmp); } catch (_ign) {}
+    }
+    return true;
+  } catch (_err) {
+    // Diagnostics are best-effort only; never break the caller.
+    return false;
+  }
+}
+
+/**
+ * Writes the persisted cooldown marker and stamps the in-process throttle.
  * Called ONLY after a full discovery+probe cycle that yielded no live quota.
  * @param {string} [markerPath=PROBE_COOLDOWN_MARKER] - Marker file path override (test hook).
+ * @param {object} [info] - REQ-3 Fix 1 diagnostics for WHY the cycle failed.
+ * @param {string} [info.reason] - 'language_server_probe_failed' (server unreachable /
+ *   no quota pool) or 'auth_failure' (server reachable, HTTP 401 — CSRF token missing/invalid).
+ * @param {string} [info.detail] - Short sanitized failure detail for offline diagnosis.
+ * @param {string} [info.tokenSource] - Token source used for the attempt ('command_line' | 'none').
  */
-function writeProbeCooldown(markerPath = PROBE_COOLDOWN_MARKER) {
+function writeProbeCooldown(markerPath = PROBE_COOLDOWN_MARKER, info = {}) {
   try {
     const dir = path.dirname(markerPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
     const payload = {
-      version: 1,
-      reason: 'language_server_probe_failed',
+      version: 2,
+      reason: info.reason || 'language_server_probe_failed',
+      detail: typeof info.detail === 'string' ? info.detail.slice(0, 300) : null,
+      tokenSource: info.tokenSource || 'command_line',
       setAtMs: Date.now(),
       expiryMs: Date.now() + PROBE_COOLDOWN_MS
     };
@@ -383,7 +505,12 @@ function makeRpcRequest({
             reject(new Error(`Failed to parse ${rpcPath} response JSON: ${e.message}`));
           }
         } else {
-          reject(new Error(`${rpcPath} returned HTTP ${res.statusCode}: ${data}`));
+          const httpErr = new Error(`${rpcPath} returned HTTP ${res.statusCode}: ${data}`);
+          // REQ-3 Fix 1: tag the HTTP status so callers can distinguish an
+          // authentication rejection (401 — server alive, CSRF token missing/
+          // invalid) from a genuine "no server" negative probe.
+          httpErr.httpStatus = res.statusCode;
+          reject(httpErr);
         }
       });
     });
@@ -829,7 +956,10 @@ async function fetchLiveGeminiQuota(opts = {}) {
     // Antigravity's language server is not running. Explicit callers (unit
     // tests passing port/ports/fetcher, or forceRefresh) bypass the cooldown.
     const hasExplicitTarget = Boolean(opts.port || (Array.isArray(opts.ports) && opts.ports.length > 0) || typeof opts.fetcher === 'function');
-    if (!opts.forceRefresh && !hasExplicitTarget && readProbeCooldown(opts.cooldownMarker)) {
+    const cooldownInfo = (!opts.forceRefresh && !hasExplicitTarget)
+      ? readProbeCooldownInfo(opts.cooldownMarker)
+      : null;
+    if (cooldownInfo && !shouldBypassCooldownForStale(readQuotaSnapshotTimestamp(cachePath), cooldownInfo.setAtMs)) {
       return {
         isLive: false,
         remainPercent: null,
@@ -841,9 +971,14 @@ async function fetchLiveGeminiQuota(opts = {}) {
         quota7d: null,
         error: `Language server probe cooldown active (retries suppressed for ${Math.round(PROBE_COOLDOWN_MS / 60000)} min after a failed scan)`,
         source: 'cooldown',
+        cooldownReason: cooldownInfo.reason,
         cacheFile: cachePath
       };
     }
+    // REQ-3 Fix 3: reached here either with no cooldown or via the stale-escape
+    // bypass (cache older than STALE_RETRY_AFTER_MS and marker at least as old),
+    // so at most ONE discovery burst per STALE_RETRY_AFTER_MS window can leak
+    // past an active cooldown — bounded, no TLS flood regression.
 
     if (!port && candidatePorts.length === 0) {
       const discovered = await discoverLanguageServer();
@@ -890,6 +1025,10 @@ async function fetchLiveGeminiQuota(opts = {}) {
 
     const rejectUnauthorized = opts.rejectUnauthorized !== undefined ? opts.rejectUnauthorized : false;
     let quota = null;
+    // REQ-3 Fix 1: classify 401 (auth) failures separately from transport
+    // errors so the cooldown marker records WHY live fetch keeps failing.
+    let sawAuthFailure = false;
+    let authFailureDetail = null;
 
     if (typeof opts.fetcher === 'function') {
       const data = await opts.fetcher({
@@ -914,7 +1053,11 @@ async function fetchLiveGeminiQuota(opts = {}) {
             });
             quota = extractGeminiQuotaFromPayload(summaryData, refDate);
             if (quota) break outerLoop;
-          } catch (_summaryErr) {
+          } catch (summaryErr) {
+            if (summaryErr && summaryErr.httpStatus === 401) {
+              sawAuthFailure = true;
+              authFailureDetail = authFailureDetail || String(summaryErr.message || '').slice(0, 300);
+            }
             // Try GetUserStatus or next protocol
           }
 
@@ -931,7 +1074,11 @@ async function fetchLiveGeminiQuota(opts = {}) {
               });
               quota = extractGeminiQuotaFromPayload(statusData, refDate);
               if (quota) break outerLoop;
-            } catch (_statusErr) {
+            } catch (statusErr) {
+              if (statusErr && statusErr.httpStatus === 401) {
+                sawAuthFailure = true;
+                authFailureDetail = authFailureDetail || String(statusErr.message || '').slice(0, 300);
+              }
               // Try next protocol / port
             }
           }
@@ -943,9 +1090,24 @@ async function fetchLiveGeminiQuota(opts = {}) {
       // Probed every candidate port/protocol but no live quota came back:
       // persist cooldown so subsequent statusline renders stay silent.
       // Explicit-target probes (tests/forced port) never write the marker.
+      // REQ-3 Fix 1: an HTTP 401 means the server IS alive and only auth
+      // failed — record that distinctly from a genuine probe failure.
+      const authFailure = typeof sawAuthFailure !== 'undefined' ? sawAuthFailure : false;
+      const cooldownReason = authFailure ? 'auth_failure' : 'language_server_probe_failed';
+      const errorKind = authFailure ? 'auth_failure' : 'probe_failed';
+      const errorDetail = authFailure
+        ? (authFailureDetail || 'HTTP 401 (missing CSRF token)')
+        : 'No Gemini quota pool found in Language Server response';
       if (!hasExplicitTarget) {
-        writeProbeCooldown(opts.cooldownMarker);
+        writeProbeCooldown(opts.cooldownMarker, {
+          reason: cooldownReason,
+          detail: errorDetail,
+          tokenSource: csrfToken ? 'command_line' : 'none'
+        });
       }
+      // REQ-3 Fix 3: stamp attempt diagnostics into the existing cache
+      // (no-op when there is no cache file yet).
+      recordQuotaAttemptFailure({ errorKind, errorDetail }, cachePath);
       return {
         isLive: false,
         remainPercent: null,
@@ -955,7 +1117,10 @@ async function fetchLiveGeminiQuota(opts = {}) {
         resetInSeconds: null,
         quota5h: null,
         quota7d: null,
-        error: 'No Gemini quota pool found in Language Server response',
+        error: authFailure
+          ? `Language Server rejected the CSRF token (HTTP 401): ${errorDetail}`
+          : 'No Gemini quota pool found in Language Server response',
+        errorKind,
         source: 'fallback',
         cacheFile: cachePath
       };
@@ -971,6 +1136,9 @@ async function fetchLiveGeminiQuota(opts = {}) {
       cacheFile: cachePath
     };
   } catch (err) {
+    // REQ-3 Fix 3: even unexpected exceptions get stamped as attempt
+    // diagnostics so `agy-tokens --hook --json` can surface them.
+    recordQuotaAttemptFailure({ errorKind: 'exception', errorDetail: String(err && err.message || err) }, cachePath);
     return {
       isLive: false,
       remainPercent: null,
@@ -981,6 +1149,7 @@ async function fetchLiveGeminiQuota(opts = {}) {
       quota5h: null,
       quota7d: null,
       error: err.message,
+      errorKind: 'exception',
       source: 'fallback',
       cacheFile: cachePath
     };
@@ -1016,7 +1185,12 @@ module.exports = {
   CACHE_TTL_MS,
   PROBE_COOLDOWN_MARKER,
   PROBE_COOLDOWN_MS,
+  STALE_RETRY_AFTER_MS,
   readProbeCooldown,
+  readProbeCooldownInfo,
+  readQuotaSnapshotTimestamp,
+  shouldBypassCooldownForStale,
+  recordQuotaAttemptFailure,
   writeProbeCooldown,
   clearProbeCooldown,
   formatCountdownDuration,

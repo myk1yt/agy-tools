@@ -3956,6 +3956,222 @@ async function runAllTests() {
       const helpText = formatter.renderHelp();
       assert(helpText.includes('--sync-quota'), 'Help screen must document --sync-quota');
     });
+
+    // ---- REQ-3: quota realtime-linkage fixes ----
+
+    await test('REQ-3 Fix 2: stale quota snapshot renders `*`, auth-failed stale renders `!`, fresh renders no marker', () => {
+      const prevCols = process.env.COLUMNS;
+      process.env.COLUMNS = '200';
+      try {
+        const baseQuota = (extra) => Object.assign({
+          remainPercent: 97,
+          quota5h: { remainPercent: 97, resetFormatted: '1h 18m', window: '5h' },
+          quota7d: { remainPercent: 83, resetFormatted: '3d 20h', window: 'weekly' },
+          isLive: true,
+          source: 'language_server'
+        }, extra);
+
+        // Fresh cache read (isFresh true) => no marker anywhere
+        const fresh = formatter.stripAnsi(formatter.renderRealTimeBadge({
+          turnTokens: 100, turnCostUsd: 0.001, todayTokens: 1000, todayCostUsd: 0.01,
+          cacheHitRate: 50, geminiQuota: baseQuota({ isFresh: true, ageMs: 1000 })
+        }, 'usd', false));
+        assert(fresh.includes('97%'), 'fresh badge must include 97%');
+        assert(!fresh.includes('97%*') && !fresh.includes('97%!'), `fresh badge must NOT carry stale markers, got: ${fresh}`);
+
+        // Stale cache read (isFresh false) => `*` on BOTH segments
+        const stale = formatter.stripAnsi(formatter.renderRealTimeBadge({
+          turnTokens: 100, turnCostUsd: 0.001, todayTokens: 1000, todayCostUsd: 0.01,
+          cacheHitRate: 50, geminiQuota: baseQuota({ isFresh: false, ageMs: 12345678 })
+        }, 'usd', false));
+        assert(stale.includes('97%*'), `stale badge must mark 5h with *, got: ${stale}`);
+        assert(stale.includes('83%*'), `stale badge must mark 7d with *, got: ${stale}`);
+
+        // Stale + auth failure => `!` wins over `*`
+        const auth = formatter.stripAnsi(formatter.renderRealTimeBadge({
+          turnTokens: 100, turnCostUsd: 0.001, todayTokens: 1000, todayCostUsd: 0.01,
+          cacheHitRate: 50, geminiQuota: baseQuota({ isFresh: false, ageMs: 12345678, lastError: { kind: 'auth_failure', detail: 'HTTP 401' } })
+        }, 'usd', false));
+        assert(auth.includes('97%!') && auth.includes('83%!'), `auth-stale badge must mark with !, got: ${auth}`);
+
+        // Legacy live object without isFresh flag => no marker (backward compatible)
+        const legacy = formatter.stripAnsi(formatter.renderRealTimeBadge({
+          turnTokens: 100, turnCostUsd: 0.001, todayTokens: 1000, todayCostUsd: 0.01,
+          cacheHitRate: 50, geminiQuota: baseQuota({})
+        }, 'usd', false));
+        assert(!legacy.includes('%*') && !legacy.includes('%!'), `legacy live quota must not be marked, got: ${legacy}`);
+
+        // Marker helper contract directly
+        assert.strictEqual(formatter.quotaStalenessMarker(null), '');
+        assert.strictEqual(formatter.quotaStalenessMarker({ isFresh: true }), '');
+        assert.strictEqual(formatter.quotaStalenessMarker({ isFresh: false }), '*');
+        assert.strictEqual(formatter.quotaStalenessMarker({ isFresh: false, lastError: { kind: 'auth_failure' } }), '!');
+        assert.strictEqual(formatter.quotaStalenessMarker({ isFresh: false, lastError: { kind: 'probe_failed' } }), '*');
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+      }
+    });
+
+    await test('REQ-3 Fix 3: shouldBypassCooldownForStale gate passes only when snapshot AND marker are older than 5min', () => {
+      const now = 1_000_000_000_000;
+      const S = geminiQuota.STALE_RETRY_AFTER_MS;
+      assert.strictEqual(S, 5 * 60 * 1000, 'stale-retry window must be 5 minutes');
+
+      // Old snapshot + old marker => bypass (one retry allowed)
+      assert.strictEqual(geminiQuota.shouldBypassCooldownForStale(now - S - 60000, now - S - 1000, now), true);
+      // Fresh snapshot => blocked regardless of marker age
+      assert.strictEqual(geminiQuota.shouldBypassCooldownForStale(now - 30000, now - S - 1000, now), false);
+      // Old snapshot but marker written recently (a burst just happened) => blocked
+      assert.strictEqual(geminiQuota.shouldBypassCooldownForStale(now - S - 60000, now - 1000, now), false);
+      // Exactly at the boundary (age == S) => blocked (strictly greater required)
+      assert.strictEqual(geminiQuota.shouldBypassCooldownForStale(now - S, now - S, now), false);
+      // No cache snapshot at all => blocked (nothing visibly stale)
+      assert.strictEqual(geminiQuota.shouldBypassCooldownForStale(null, now - S - 1000, now), false);
+      // Corrupt inputs => blocked
+      assert.strictEqual(geminiQuota.shouldBypassCooldownForStale(0, 0, now), false);
+      assert.strictEqual(geminiQuota.shouldBypassCooldownForStale('x', 'y', now), false);
+    });
+
+    await test('REQ-3 Fix 1/3: 401 responses classified as auth_failure and stamped into cache diagnostics without touching snapshot age', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-quota-auth-'));
+      const testCacheFile = path.join(tempDir, 'quota_cache.json');
+
+      // Pre-existing stale snapshot (the 04:29Z-style scenario): timestampMs fixed.
+      const snapshotMs = Date.now() - 3 * 60 * 60 * 1000; // 3h old
+      fs.writeFileSync(testCacheFile, JSON.stringify({
+        version: 2,
+        timestamp: new Date(snapshotMs).toISOString(),
+        timestampMs: snapshotMs,
+        remainPercent: 97,
+        quota5h: { remainPercent: 97, window: '5h' },
+        quota7d: { remainPercent: 83, window: 'weekly' },
+        isLive: true,
+        source: 'language_server'
+      }, null, 2), 'utf8');
+
+      // Mock server that always answers 401 like the CSRF-stripped Language Server.
+      const mock401 = http.createServer((req, res) => {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: 'unauthenticated', message: 'missing CSRF token' }));
+      });
+      await new Promise((resolve) => mock401.listen(0, '127.0.0.1', resolve));
+      const boundPort = mock401.address().port;
+
+      try {
+        // makeRpcRequest must expose httpStatus for classification.
+        await geminiQuota.makeRpcRequest({
+          path: '/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary',
+          port: boundPort, protocol: 'http'
+        }).then(
+          () => assert.fail('401 must reject'),
+          (err) => {
+            assert.strictEqual(err.httpStatus, 401, 'RPC error must carry httpStatus');
+          }
+        );
+
+        // fetchLiveGeminiQuota against the 401 server (explicit port => no cooldown
+        // marker writes, but cache diagnostics must still record the auth failure).
+        const res = await geminiQuota.fetchLiveGeminiQuota({
+          port: boundPort,
+          csrfToken: '',
+          protocol: 'http',
+          cachePath: testCacheFile
+        });
+        assert.strictEqual(res.isLive, false);
+        assert.strictEqual(res.errorKind, 'auth_failure', `401 must classify as auth_failure, got: ${res.errorKind}`);
+        assert(String(res.error).includes('401'), `error text must mention 401, got: ${res.error}`);
+
+        // Cache decorated with lastAttemptAtMs/lastError, snapshot age untouched.
+        const cached = JSON.parse(fs.readFileSync(testCacheFile, 'utf8'));
+        assert.strictEqual(cached.timestampMs, snapshotMs, 'failed attempt must NOT touch timestampMs');
+        assert.strictEqual(typeof cached.lastAttemptAtMs, 'number', 'lastAttemptAtMs must be stamped');
+        assert(cached.lastError && cached.lastError.kind === 'auth_failure', 'lastError.kind must be auth_failure');
+        assert(typeof cached.lastError.detail === 'string' && cached.lastError.detail.includes('401'), 'lastError.detail must carry the HTTP 401 evidence');
+
+        // getCachedGeminiQuota passes the diagnostics through to the statusline renderer.
+        const readBack = geminiQuota.getCachedGeminiQuota(testCacheFile, 30000);
+        assert.strictEqual(readBack.isFresh, false);
+        assert(readBack.lastError && readBack.lastError.kind === 'auth_failure', 'stale read must surface lastError');
+        assert.strictEqual(readBack.lastAttemptAtMs, cached.lastAttemptAtMs);
+
+        // And the badge shows the `!` warning for this exact state.
+        const prevCols = process.env.COLUMNS;
+        process.env.COLUMNS = '200';
+        try {
+          const badge = formatter.stripAnsi(formatter.renderRealTimeBadge({
+            turnTokens: 1, turnCostUsd: 0, todayTokens: 1, todayCostUsd: 0, cacheHitRate: 0,
+            geminiQuota: readBack
+          }, 'usd', false));
+          assert(badge.includes('97%!'), `auth-stale badge must render !, got: ${badge}`);
+        } finally {
+          if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+        }
+      } finally {
+        await new Promise((resolve) => mock401.close(resolve));
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('REQ-3 Fix 1/3: cooldown marker v2 carries reason/detail/tokenSource, stays backward compatible, and the gate reports cooldownReason', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-quota-cd-'));
+      const markerPath = path.join(tempDir, 'gemini_quota_probe_cooldown.json');
+      try {
+        // v2 write with auth-failure diagnostics
+        geminiQuota.writeProbeCooldown(markerPath, {
+          reason: 'auth_failure',
+          detail: 'RetrieveUserQuotaSummary returned HTTP 401: {"code":"unauthenticated"}',
+          tokenSource: 'none'
+        });
+        const raw = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+        assert.strictEqual(raw.version, 2);
+        assert.strictEqual(raw.reason, 'auth_failure');
+        assert.strictEqual(raw.tokenSource, 'none');
+        assert(raw.detail.includes('401'));
+
+        const info = geminiQuota.readProbeCooldownInfo(markerPath);
+        assert(info !== null);
+        assert.strictEqual(info.reason, 'auth_failure');
+        assert(typeof info.setAtMs === 'number' && info.setAtMs > 0, 'setAtMs must be present for the stale-retry gate');
+
+        // v1 marker (pre-REQ-3 file) tolerated: defaults filled in.
+        fs.writeFileSync(markerPath, JSON.stringify({ version: 1, reason: 'language_server_probe_failed', setAtMs: Date.now(), expiryMs: Date.now() + 60000 }), 'utf8');
+        const infoV1 = geminiQuota.readProbeCooldownInfo(markerPath);
+        assert.strictEqual(infoV1.version, 1);
+        assert.strictEqual(infoV1.reason, 'language_server_probe_failed');
+        assert.strictEqual(infoV1.detail, null);
+        // Legacy reader still works on either version
+        assert.strictEqual(typeof geminiQuota.readProbeCooldown(markerPath), 'number');
+
+        // fetchLiveGeminiQuota cooldown gate: active marker + fresh-ish cache => early return with reason
+        const testCacheFile = path.join(tempDir, 'quota_cache.json');
+        fs.writeFileSync(testCacheFile, JSON.stringify({ version: 2, timestampMs: Date.now() - 60000, remainPercent: 50 }), 'utf8');
+        geminiQuota.writeProbeCooldown(markerPath, { reason: 'auth_failure', detail: 'x', tokenSource: 'none' });
+        return geminiQuota.fetchLiveGeminiQuota({
+          cachePath: testCacheFile,
+          cooldownMarker: markerPath
+        }).then((res) => {
+          assert.strictEqual(res.source, 'cooldown', 'gate must short-circuit into cooldown');
+          assert.strictEqual(res.cooldownReason, 'auth_failure', 'cooldown reason must be surfaced to callers');
+          assert.strictEqual(res.isLive, false);
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        });
+      } catch (e) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        throw e;
+      }
+    });
+
+    await test('REQ-3 Fix 1: CSRF token fallback NOT implemented — no evidence-backed alternate token source exists on this platform (see session report)', () => {
+      // Intentional documentation test: the recon sweeps (scratch/req3_csrf_recon*.py,
+      // req3_keyring_probe.ps1, req3_http_probe.js) found no file/env/handle source
+      // exposing the Language Server CSRF token. parseCommandLine + discovery remain
+      // the ONLY token path (command_line, first priority). If a future agy build
+      // persists the state JSON {pid,httpsPort,csrfToken}, extend discoverLanguageServer
+      // then — guessing a path today is prohibited.
+      assert(typeof geminiQuota.discoverLanguageServer === 'function');
+      const parsed = geminiQuota.parseCommandLine('agy.exe --api_url https://127.0.0.1:60125 --csrf_token tok-123');
+      assert.strictEqual(parsed.csrfToken, 'tok-123', 'command-line token path must remain first priority');
+    });
   });
 
   // --- Suite 25: Cross-Platform Installer Scripts Unit Tests ---

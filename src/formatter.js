@@ -769,6 +769,25 @@ function wrapBadgeSegments(segments, width) {
 }
 
 /**
+ * REQ-3 Fix 2: compute the stale/auth marker appended right after a quota
+ * percentage. The cached snapshot keeps re-rendering its last-known values,
+ * so without a marker a frozen 97% is indistinguishable from a live one.
+ * Rules (kept to 1 visible char to minimize badge width impact):
+ *  - `*`  cache age exceeded the freshness TTL (gq.isFresh === false)
+ *  - `!`  stale AND the last live fetch attempt failed with HTTP 401
+ *         (auth failure — CSRF token missing/rejected; gq.lastError.kind)
+ *  - ``   fresh snapshot, or live object without an isFresh flag
+ * @param {object} gq - badgeData.geminiQuota (cache-read shape).
+ * @returns {string} Marker appended directly after the `%` digits.
+ */
+function quotaStalenessMarker(gq) {
+  if (!gq || gq.isFresh !== false) return '';
+  const err = gq.lastError;
+  if (err && typeof err === 'object' && err.kind === 'auth_failure') return '!';
+  return '*';
+}
+
+/**
  * Generates a real-time status badge string for PostInvocation hooks.
  * Normally a single line; when the badge's visible width exceeds the
  * terminal width (COLUMNS || stdout.columns || 100) it is intentionally
@@ -801,25 +820,26 @@ function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, li
 
   if (badgeData.geminiQuota && badgeData.geminiQuota.remainPercent !== null && badgeData.geminiQuota.remainPercent !== undefined) {
     const gq = badgeData.geminiQuota;
+    const staleMark = quotaStalenessMarker(gq);
     if (gq.quota5h || gq.quota7d) {
       if (gq.quota5h && gq.quota5h.remainPercent !== null && gq.quota5h.remainPercent !== undefined) {
         const pct5 = Math.max(0, Math.min(100, Math.round(Number(gq.quota5h.remainPercent) || 0)));
         const bar5 = formatMiniBar(pct5, 5);
         const resetPart5 = gq.quota5h.resetFormatted ? ` (${gq.quota5h.resetFormatted})` : '';
-        segments.push(`5h: ${styleText(bar5, 'brightCyan')} ${pct5}%${resetPart5}`);
+        segments.push(`5h: ${styleText(bar5, 'brightCyan')} ${pct5}%${staleMark}${resetPart5}`);
       }
       if (gq.quota7d && gq.quota7d.remainPercent !== null && gq.quota7d.remainPercent !== undefined) {
         const pct7 = Math.max(0, Math.min(100, Math.round(Number(gq.quota7d.remainPercent) || 0)));
         const bar7 = formatMiniBar(pct7, 5);
         const resetPart7 = gq.quota7d.resetFormatted ? ` (${gq.quota7d.resetFormatted})` : '';
-        segments.push(`7d: ${styleText(bar7, 'brightCyan')} ${pct7}%${resetPart7}`);
+        segments.push(`7d: ${styleText(bar7, 'brightCyan')} ${pct7}%${staleMark}${resetPart7}`);
       }
     } else {
       const gPct = Math.max(0, Math.min(100, Math.round(Number(gq.remainPercent) || 0)));
       const bar = formatMiniBar(gPct, 5);
       const resetWord = t('quotaReset') || '리셋';
       const resetPart = gq.resetFormatted ? ` (${resetWord} ${gq.resetFormatted})` : '';
-      const gqSegment = `${t('quota5h') || '5h'}: ${styleText(bar, 'brightCyan')} ${gPct}%${resetPart}`;
+      const gqSegment = `${t('quota5h') || '5h'}: ${styleText(bar, 'brightCyan')} ${gPct}%${staleMark}${resetPart}`;
       segments.push(gqSegment);
     }
   } else if (badgeData.rollingUsage) {
@@ -907,6 +927,7 @@ ${styleText('Examples:', 'bold')}
 
 module.exports = {
   STYLES,
+  quotaStalenessMarker,
   setColorsEnabled,
   styleText,
   stripAnsi,
