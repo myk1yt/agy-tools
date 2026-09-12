@@ -23,6 +23,77 @@ const HTTP_TIMEOUT_MS = 2500;
 let _lastBackgroundTriggerAt = 0;
 const BACKGROUND_TRIGGER_THROTTLE_MS = 10000;
 
+// TLS-handshake flood guard (FY-2026-09-12-001): when the Language Server is
+// NOT running, discovery keeps probing loopback ports every statusline render
+// and each plain-HTTP fallback probe makes the local HTTPS-only Go server
+// emit "http: TLS handshake error" lines that flood the interactive TUI.
+// Fix: persist a negative-probe cooldown so at most ONE discovery burst
+// happens per cooldown window. Cleared automatically when a probe succeeds.
+const PROBE_COOLDOWN_MARKER = path.join(config.GEMINI_DIR, 'gemini_quota_probe_cooldown.json');
+const PROBE_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+/**
+ * Reads the persisted negative-probe cooldown marker.
+ * @param {string} [markerPath=PROBE_COOLDOWN_MARKER] - Marker file path override (test hook).
+ * @returns {number|null} Cooldown expiry timestamp (ms), or null when absent/expired/unreadable.
+ */
+function readProbeCooldown(markerPath = PROBE_COOLDOWN_MARKER) {
+  try {
+    if (!fs.existsSync(markerPath)) return null;
+    const raw = fs.readFileSync(markerPath, 'utf8');
+    const data = JSON.parse(raw);
+    if (!data || typeof data.expiryMs !== 'number' || isNaN(data.expiryMs)) return null;
+    if (Date.now() >= data.expiryMs) {
+      // Expired: clear it so the marker doesn't linger indefinitely.
+      try { fs.unlinkSync(markerPath); } catch (_e) {}
+      return null;
+    }
+    return data.expiryMs;
+  } catch (_err) {
+    return null;
+  }
+}
+
+/**
+ * Writes the persisted negative-probe cooldown marker and stamps the in-process throttle.
+ * Called ONLY after a full discovery+probe cycle that yielded no live quota.
+ * @param {string} [markerPath=PROBE_COOLDOWN_MARKER] - Marker file path override (test hook).
+ */
+function writeProbeCooldown(markerPath = PROBE_COOLDOWN_MARKER) {
+  try {
+    const dir = path.dirname(markerPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const payload = {
+      version: 1,
+      reason: 'language_server_probe_failed',
+      setAtMs: Date.now(),
+      expiryMs: Date.now() + PROBE_COOLDOWN_MS
+    };
+    const tmp = `${markerPath}.${Date.now()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(payload), 'utf8');
+    try {
+      fs.renameSync(tmp, markerPath);
+    } catch (_e) {
+      fs.writeFileSync(markerPath, JSON.stringify(payload), 'utf8');
+      try { fs.unlinkSync(tmp); } catch (_ign) {}
+    }
+  } catch (_err) {
+    // Marker best-effort only; never break the caller.
+  }
+  _lastBackgroundTriggerAt = Date.now();
+}
+
+/**
+ * Clears the persisted cooldown marker (called when a probe SUCCEEDS).
+ * @param {string} [markerPath=PROBE_COOLDOWN_MARKER] - Marker file path override (test hook).
+ */
+function clearProbeCooldown(markerPath = PROBE_COOLDOWN_MARKER) {
+  try {
+    if (fs.existsSync(markerPath)) fs.unlinkSync(markerPath);
+  } catch (_err) {}
+}
+
 /**
  * Formats seconds remaining into a compact, human-readable countdown string.
  * Examples: "2h 15m", "45m", "1d 4h", "30s"
@@ -753,6 +824,27 @@ async function fetchLiveGeminiQuota(opts = {}) {
     let discoveredProtocol = null;
     let candidatePorts = opts.ports || (port ? [port] : []);
 
+    // FY-2026-09-12-001: honor the negative-probe cooldown BEFORE spawning any
+    // discovery work — this is what stops the TLS-handshake-error flood while
+    // Antigravity's language server is not running. Explicit callers (unit
+    // tests passing port/ports/fetcher, or forceRefresh) bypass the cooldown.
+    const hasExplicitTarget = Boolean(opts.port || (Array.isArray(opts.ports) && opts.ports.length > 0) || typeof opts.fetcher === 'function');
+    if (!opts.forceRefresh && !hasExplicitTarget && readProbeCooldown(opts.cooldownMarker)) {
+      return {
+        isLive: false,
+        remainPercent: null,
+        remainingFraction: null,
+        resetTime: null,
+        resetFormatted: null,
+        resetInSeconds: null,
+        quota5h: null,
+        quota7d: null,
+        error: `Language server probe cooldown active (retries suppressed for ${Math.round(PROBE_COOLDOWN_MS / 60000)} min after a failed scan)`,
+        source: 'cooldown',
+        cacheFile: cachePath
+      };
+    }
+
     if (!port && candidatePorts.length === 0) {
       const discovered = await discoverLanguageServer();
       if (discovered) {
@@ -764,6 +856,12 @@ async function fetchLiveGeminiQuota(opts = {}) {
     }
 
     if (candidatePorts.length === 0) {
+      // No server found: persist the cooldown so the next statusline renders
+      // stop hammering loopback with HTTPS-first probes (TLS flood root cause).
+      // Explicit-target probes (tests/forced port) never write the marker.
+      if (!hasExplicitTarget) {
+        writeProbeCooldown(opts.cooldownMarker);
+      }
       return {
         isLive: false,
         remainPercent: null,
@@ -842,6 +940,12 @@ async function fetchLiveGeminiQuota(opts = {}) {
     }
 
     if (!quota) {
+      // Probed every candidate port/protocol but no live quota came back:
+      // persist cooldown so subsequent statusline renders stay silent.
+      // Explicit-target probes (tests/forced port) never write the marker.
+      if (!hasExplicitTarget) {
+        writeProbeCooldown(opts.cooldownMarker);
+      }
       return {
         isLive: false,
         remainPercent: null,
@@ -856,6 +960,9 @@ async function fetchLiveGeminiQuota(opts = {}) {
         cacheFile: cachePath
       };
     }
+
+    // Success: clear any stale cooldown marker so future failures re-probe fast.
+    clearProbeCooldown(opts.cooldownMarker);
 
     const saved = saveCachedGeminiQuota(quota, cachePath);
     return {
@@ -907,6 +1014,11 @@ async function getGeminiQuota(opts = {}) {
 module.exports = {
   GEMINI_QUOTA_CACHE_FILE,
   CACHE_TTL_MS,
+  PROBE_COOLDOWN_MARKER,
+  PROBE_COOLDOWN_MS,
+  readProbeCooldown,
+  writeProbeCooldown,
+  clearProbeCooldown,
   formatCountdownDuration,
   formatResetTime,
   parseCommandLine,
