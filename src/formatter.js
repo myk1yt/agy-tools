@@ -650,16 +650,19 @@ function getBadgeVisibleWidth(str) {
 
 /**
  * Resolves the render-time terminal width for badge wrapping.
- * Priority: process.env.COLUMNS (test-controllable) -> process.stdout.columns
- * -> fallback 100. Invalid/non-positive values are skipped.
+ * Priority: process.env.COLUMNS (test/explicit) ->
+ * process.stdout.columns (when stdout is a TTY and has a valid positive width) ->
+ * fallback Infinity (default to 1 single line in hook/subprocess/non-TTY environments,
+ * or when terminal width cannot be determined).
  * @returns {number}
  */
 function resolveBadgeWidth() {
   const envCols = parseInt(process.env.COLUMNS, 10);
   if (Number.isFinite(envCols) && envCols > 0) return envCols;
-  const cols = process.stdout && process.stdout.columns;
-  if (Number.isFinite(cols) && cols > 0) return cols;
-  return 100;
+  if (process.stdout && process.stdout.isTTY && Number.isFinite(process.stdout.columns) && process.stdout.columns > 0) {
+    return process.stdout.columns;
+  }
+  return Infinity;
 }
 
 /**
@@ -736,7 +739,7 @@ function wrapBadgeSegments(segments, width) {
   const sepW = SEP.length;
   const widths = segments.map(getBadgeVisibleWidth);
   const total = widths.reduce((a, b) => a + b, 0) + sepW * Math.max(0, segments.length - 1);
-  if (total <= width) {
+  if (!Number.isFinite(width) || width <= 0 || total <= width) {
     return segments.join(SEP);
   }
 

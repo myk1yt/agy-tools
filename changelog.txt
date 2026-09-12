@@ -2,6 +2,55 @@
 Antigravity-cli (agy-tools) Changelog
 ================================================================================
 
+Version: 0.10.2
+Release Date: 2026-09-12
+Previous Version: 0.10.1
+
+--------------------------------------------------------------------------------
+[Overview]
+--------------------------------------------------------------------------------
+This release fixes statusline badge wrapping behavior in hook and subprocess
+environments (such as Antigravity CLI's statusLine integration). Previously,
+when process.stdout.columns was unavailable or stdout was not a TTY, the formatter
+fell back to an arbitrary 100-column width limit, causing normal badges containing
+the Dashboard link (📊 대시보드) to wrap onto a second line with Dashboard isolated.
+The formatter now defaults strictly to 1 single line in hook/subprocess/non-TTY
+environments, and only wraps to 2 lines when terminal columns are genuinely
+known and too narrow.
+
+--------------------------------------------------------------------------------
+[Detailed Changes & Differences from 0.10.1]
+--------------------------------------------------------------------------------
+
+1. Terminal Width Resolution & Non-TTY Single-Line Default (src/formatter.js)
+   - Updated resolveBadgeWidth():
+     * Respects process.env.COLUMNS when explicitly provided.
+     * Evaluates process.stdout.columns ONLY when process.stdout.isTTY is true and
+       positive finite columns are available.
+     * Falls back to Infinity instead of 100 in non-TTY, piped, or hook subprocess
+       environments.
+   - Guarded wrapBadgeSegments() against non-finite or non-positive widths to ensure
+     clean single-line rendering by default.
+   - Prevents premature line breaks that previously pushed the Dashboard link segment
+     down to line 2 during routine Antigravity statusLine invocations.
+
+2. Test Suite Expansion (test/run-tests.js)
+   - Added REQ-1f: Verified resolveBadgeWidth returns Infinity when COLUMNS is unset
+     and stdout is not a TTY.
+   - Added REQ-1g: Verified renderRealTimeBadge defaults to 1 single line in hook/
+     subprocess (non-TTY) environments, retaining the Dashboard link inline.
+   - Added REQ-1h: Verified renderRealTimeBadge wraps into 2 physical lines when
+     stdout.isTTY is true and stdout.columns is narrow (< total width).
+   - Test suite pass rate: 208 passed, 0 failed (100% pass rate).
+
+3. Version Bump (package.json)
+   - Bumped version to 0.10.2.
+
+4. Zero External Dependency Invariant
+   - Built purely with Node.js standard built-ins.
+
+--------------------------------------------------------------------------------
+
 Version: 0.10.1
 Release Date: 2026-09-12
 Previous Version: 0.10.0

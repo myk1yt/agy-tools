@@ -2553,6 +2553,67 @@ async function runAllTests() {
       assert.strictEqual(formatter.getBadgeVisibleWidth('안녕'), 4, 'CJK width still 2 per char');
     });
 
+    await test('REQ-1f: resolveBadgeWidth returns Infinity when COLUMNS is unset and stdout is not a TTY', () => {
+      const prevCols = process.env.COLUMNS;
+      delete process.env.COLUMNS;
+      const origIsTTY = process.stdout ? process.stdout.isTTY : undefined;
+      const origCols = process.stdout ? process.stdout.columns : undefined;
+      try {
+        if (process.stdout) {
+          Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
+          Object.defineProperty(process.stdout, 'columns', { value: 80, configurable: true });
+        }
+        assert.strictEqual(formatter.resolveBadgeWidth(), Infinity);
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+        if (process.stdout) {
+          Object.defineProperty(process.stdout, 'isTTY', { value: origIsTTY, configurable: true });
+          Object.defineProperty(process.stdout, 'columns', { value: origCols, configurable: true });
+        }
+      }
+    });
+
+    await test('REQ-1g: renderRealTimeBadge defaults to 1 single line in hook/subprocess (non-TTY) environment', () => {
+      const prevCols = process.env.COLUMNS;
+      delete process.env.COLUMNS;
+      const origIsTTY = process.stdout ? process.stdout.isTTY : undefined;
+      try {
+        if (process.stdout) {
+          Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
+        }
+        const badge = formatter.renderRealTimeBadge(req1WideBadgeData(), 'usd', false, req1Osc8Link);
+        assert(!badge.includes('\n'), 'Statusline badge must remain 1 single line when stdout is not a TTY (no newline)');
+        assert(badge.includes('📊 Dashboard'), 'Dashboard link must remain on the single line');
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+        if (process.stdout) {
+          Object.defineProperty(process.stdout, 'isTTY', { value: origIsTTY, configurable: true });
+        }
+      }
+    });
+
+    await test('REQ-1h: renderRealTimeBadge wraps into 2 lines when stdout.isTTY is true and stdout.columns is narrow', () => {
+      const prevCols = process.env.COLUMNS;
+      delete process.env.COLUMNS;
+      const origIsTTY = process.stdout ? process.stdout.isTTY : undefined;
+      const origCols = process.stdout ? process.stdout.columns : undefined;
+      try {
+        if (process.stdout) {
+          Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+          Object.defineProperty(process.stdout, 'columns', { value: 80, configurable: true });
+        }
+        const badge = formatter.renderRealTimeBadge(req1WideBadgeData(), 'usd', false, req1Osc8Link);
+        const lines = badge.split('\n');
+        assert.strictEqual(lines.length, 2, 'Must wrap into exactly 2 lines when terminal width is narrow');
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+        if (process.stdout) {
+          Object.defineProperty(process.stdout, 'isTTY', { value: origIsTTY, configurable: true });
+          Object.defineProperty(process.stdout, 'columns', { value: origCols, configurable: true });
+        }
+      }
+    });
+
     await test('renderHelp should include dashboard flags', () => {
       const help = formatter.renderHelp();
       assert(help.includes('--html'));
