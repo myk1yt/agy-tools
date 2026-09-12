@@ -86,16 +86,35 @@ flowchart TD
     Dash -->|병합 및 대체| Core
 ```
 
-| 브랜치 | 설명 | 주요 기능 | 빠른 시작 |
-|---|---|---|---|
-| [`main`](https://github.com/myk1yt/agy-tools/tree/main) | **코어 엔진 & 개발자 툴킷** | 상태줄 배지, SSE 웹 대시보드, 1:1 Gemini 쿼터 풀 RPC, 동적 단가 계산, 21개 언어 | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` |
-| [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) | **Zero-MCP 디자인 전문가** | `@designer` 에이전트, 5개 모듈형 스킬 (SVG, 3D 캔버스, 사이버펑크, 샌드박스, QA 하네스) | `git checkout Agent/designer && powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1` |
-| [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) | **엔터프라이즈 멀티 에이전트 보안 감사** | `@security-reviewer` 오케스트레이터 + 4개 도메인 인스펙터 (OWASP, IAM, 자격 증명, 공급망) | `git checkout Agent/security-reviewer && powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1` |
-| [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config) | **자율 멀티 에이전트 거버넌스** | 7단계 라이프사이클 프로토콜, Master Zero-Source-Edit 불변성, 오케스트레이터 스킬 | `git checkout gemini-config && scripts\install.bat` |
-| [`dashboard`](https://github.com/myk1yt/agy-tools/tree/dashboard) | **히스토리컬 프로토타입** | 최초 토큰 추적기 기반 (현재 `main`에 완전 병합됨) | — |
+| 브랜치 | 설명 | 주요 기능 | 원큐 설치 (**명령 프롬프트**에 붙여넣기) | 원큐 설치 (**PowerShell**에 붙여넣기) | 원큐 설치 (**macOS / Linux 터미널**에 붙여넣기) |
+|---|---|---|---|---|---|
+| [`main`](https://github.com/myk1yt/agy-tools/tree/main) | **코어 엔진 & 개발자 툴킷** | 상태줄 배지, SSE 웹 대시보드, 1:1 Gemini 쿼터 풀 RPC, 동적 단가 계산, 21개 언어 | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` | `cmd /c "git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"` | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh` |
+| [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) | **Zero-MCP 디자인 전문가** | `@designer` 에이전트, 5개 모듈형 스킬 (SVG, 3D 캔버스, 사이버펑크, 샌드박스, QA 하네스) | `git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1` | `cmd /c "git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1"` | `git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-designer.sh` |
+| [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) | **엔터프라이즈 멀티 에이전트 보안 감사** | `@security-reviewer` 오케스트레이터 + 4개 도메인 인스펙터 (OWASP, IAM, 자격 증명, 공급망) | `git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-security-reviewer.ps1` | `cmd /c "git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-security-reviewer.ps1"` | `git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-security-reviewer.sh` |
+| [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config) | **자율 멀티 에이전트 거버넌스** | 7단계 라이프사이클 프로토콜, Master Zero-Source-Edit 불변성, 오케스트레이터 스킬 | `git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` | `cmd /c "git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"` | `git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh` |
+| [`dashboard`](https://github.com/myk1yt/agy-tools/tree/dashboard) | **히스토리컬 프로토타입** | 최초 토큰 추적기 기반 (현재 `main`에 완전 병합됨) | — | — | — |
 
 > [!TIP]
-> 각 브랜치는 자체 **원클릭 설치/삭제 스크립트**를 제공합니다. 설치 전 `git checkout <브랜치>` 명령으로 해당 브랜치로 전환하세요.
+> 위 표의 각 줄은 **새 컴퓨터에서 한 번에 끝나는 완전한 설치 명령어**입니다. `git clone -b <브랜치>`는 클론하는 동안 해당 브랜치로 체크아웃이 자동으로 되므로, 별도로 `git checkout`을 치다가 빠뜨려 "plugin.json not found"가 나는 함정이 원천 차단됩니다. `&&` 연결은 명령 프롬프트와 macOS/Linux bash에서는 그대로 동작하지만, 기본 설치된 **Windows PowerShell 5.1은 `&&`을 구문 오류로 거부**합니다 — 그래서 PowerShell 열용례를 위해 `cmd /c "..."`로 감싼 버전을 함께 실었습니다. PowerShell 창에 해당 한 줄만 붙여넣으면 끝까지 실행됩니다.
+
+#### 사전 요구사항 (git + Node.js) 먼저 설치 — 이것도 한 줄로
+
+`git`은 Visual Studio Code를 설치했다면 함께 들어 있습니다. 정말 없다면 `winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements`로 먼저 설치하세요. Node.js는 **`main` 브랜치에만 필요**합니다 (`Agent/*` 플러그인 브랜치는 `node`가 아니라 `agy`를 호출합니다). 플랫폼별 한 줄 설치:
+
+```powershell
+# Windows — Node.js LTS 설치 (`node --version`이 이미 되면 생략)
+winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements
+```
+
+```bash
+# macOS (Homebrew)
+brew install node
+
+# Debian / Ubuntu
+sudo apt-get update && sudo apt-get install -y nodejs npm
+```
+
+winget으로 설치한 후에는 반드시 **새 터미널 창을 열고** 설치 원큐 명령어를 실행하세요 — 새 창이 PATH를 다시 읽어 `node`가 인식됩니다.
 
 ---
 
@@ -119,14 +138,20 @@ Figma, Blender, 외부 MCP 도구 없이 순수 웹 표준(HTML5, CSS3, SVG, Web
 
 **설치 및 사용법:**
 ```bash
-# 1. designer 브랜치로 전환
+# 새 컴퓨터 — 원큐 설치 (macOS / Linux 터미널; 클론 중에 브랜치 전환이 자동으로 됨):
+git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-designer.sh
+```
+
+```powershell
+# 새 컴퓨터 — 원큐 설치 (Windows, PowerShell 또는 명령 프롬프트에 붙여넣기):
+cmd /c "git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1"
+```
+
+```bash
+# 이미 클론한 적이 있는 경우? 브랜치로 전환한 뒤 설치:
 git checkout Agent/designer
-
-# 2. 설치 (Windows PowerShell)
-powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1
-
-# 2. 설치 (Linux / macOS)
-bash scripts/install-designer.sh
+powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1   # Windows
+bash scripts/install-designer.sh                                        # Linux / macOS
 ```
 
 Antigravity CLI에서 호출: `/agent` → `designer` 선택, 또는 `@designer`를 직접 호출하세요.
@@ -152,14 +177,20 @@ OWASP Top 10, CWE Top 25, Google Cloud `roles/iam.securityReviewer` 최소 권�
 
 **설치 및 사용법:**
 ```bash
-# 1. security-reviewer 브랜치로 전환
+# 새 컴퓨터 — 원큐 설치 (macOS / Linux 터미널; 클론 중에 브랜치 전환이 자동으로 됨):
+git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-security-reviewer.sh
+```
+
+```powershell
+# 새 컴퓨터 — 원큐 설치 (Windows, PowerShell 또는 명령 프롬프트에 붙여넣기):
+cmd /c "git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-security-reviewer.ps1"
+```
+
+```bash
+# 이미 클론한 적이 있는 경우? 브랜치로 전환한 뒤 설치:
 git checkout Agent/security-reviewer
-
-# 2. 설치 (Windows PowerShell)
-powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1
-
-# 2. 설치 (Linux / macOS)
-bash scripts/install-security-reviewer.sh
+powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1   # Windows
+bash scripts/install-security-reviewer.sh                                        # Linux / macOS
 ```
 
 Antigravity CLI에서 호출: `/agent` → `security-reviewer` 선택, 또는 `@security-reviewer`를 직접 호출하세요.
@@ -181,14 +212,20 @@ Antigravity CLI에서 호출: `/agent` → `security-reviewer` 선택, 또는 `@
 
 **설치:**
 ```bash
-# 1. gemini-config 브랜치로 전환
+# 새 컴퓨터 — 원큐 설치 (macOS / Linux 터미널; 클론 중에 브랜치 전환이 자동으로 됨):
+git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh
+```
+
+```powershell
+# 새 컴퓨터 — 원큐 설치 (Windows, PowerShell 또는 명령 프롬프트에 붙여넣기):
+cmd /c "git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"
+```
+
+```bash
+# 이미 클론한 적이 있는 경우? 브랜치로 전환한 뒤 설치:
 git checkout gemini-config
-
-# 2. 설치 (Windows)
-scripts\install.bat
-
-# 2. 설치 (Linux / macOS)
-chmod +x scripts/install.sh && ./scripts/install.sh
+scripts\install.bat                              # Windows
+chmod +x scripts/install.sh && ./scripts/install.sh   # Linux / macOS
 ```
 
 ---
@@ -199,21 +236,24 @@ chmod +x scripts/install.sh && ./scripts/install.sh
 
 ### 1️⃣ 원클릭 설치 (가장 추천)
 
-터미널에서 아래 3줄만 실행하면 **전역 명령어 등록 + 상태줄(`statusLine`) 자동 연동**까지 한 번에 완료됩니다.
+터미널에서 아래 **한 줄**만 실행하면 (본인 셸에 맞는 열 선택) **전역 명령어 등록 + 상태줄(`statusLine`) 자동 연동**까지 한 번에 완료됩니다.
 
-**Windows (명령 프롬프트 / PowerShell):**
+**Windows — 명령 프롬프트:**
 ```cmd
-git clone https://github.com/myk1yt/agy-tools.git
-cd agy-tools
-scripts\install.bat
+git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat
+```
+
+**Windows — PowerShell (5.1은 맨 `&&`을 받지 않으므로 `cmd /c`로 감쌈):**
+```powershell
+cmd /c "git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"
 ```
 
 **Linux / macOS:**
 ```bash
-git clone https://github.com/myk1yt/agy-tools.git
-cd agy-tools
-chmod +x scripts/install.sh && ./scripts/install.sh
+git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh
 ```
+
+설치 스크립트가 `npm link`로 전역 명령어를 등록하므로, 새 컴퓨터에서는 별도 `npm install -g .` 단계가 필요 없습니다. 나중에 `git pull`로 코드를 갱신한 후에는 `agy-tools` 폴더에서 `npm install -g .`를 한 번 실행해 전역 사본을 최신화하세요 (런타임은 클론 폴더가 아니라 npm 전역 사본에서 실행됩니다).
 
 ### 2️⃣ 설치 후 바로 시작하기
 1. 실행 중인 **Antigravity CLI (`agy`)를 종료 후 다시 시작**합니다.
