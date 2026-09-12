@@ -269,14 +269,28 @@ function formatResetTime(resetTime, refDate = new Date()) {
  * @returns {{ csrfToken: string|null, port: number|null, protocol: 'http'|'https'|null }}
  */
 function parseCommandLine(cmdLine) {
-  if (!cmdLine || typeof cmdLine !== 'string') {
-    return { csrfToken: null, port: null, protocol: null };
+  let csrfToken = null;
+  if (cmdLine && typeof cmdLine === 'string') {
+    const tokenMatch = cmdLine.match(/--csrf[_-]token(?:=|\s+)([a-zA-Z0-9_-]+)/i);
+    if (tokenMatch && tokenMatch[1]) {
+      csrfToken = tokenMatch[1].trim();
+    }
   }
 
-  let csrfToken = null;
-  const tokenMatch = cmdLine.match(/--csrf[_-]token(?:=|\s+)([a-zA-Z0-9_-]+)/i);
-  if (tokenMatch && tokenMatch[1]) {
-    csrfToken = tokenMatch[1].trim();
+  // Fallback to environment variables when not specified in command line
+  if (!csrfToken) {
+    if (process.env.ANTIGRAVITY_CSRF_TOKEN && typeof process.env.ANTIGRAVITY_CSRF_TOKEN === 'string') {
+      const t = process.env.ANTIGRAVITY_CSRF_TOKEN.trim();
+      if (t) csrfToken = t;
+    }
+    if (!csrfToken && process.env.CSRF_TOKEN && typeof process.env.CSRF_TOKEN === 'string') {
+      const t = process.env.CSRF_TOKEN.trim();
+      if (t) csrfToken = t;
+    }
+  }
+
+  if (!cmdLine || typeof cmdLine !== 'string') {
+    return { csrfToken, port: null, protocol: null };
   }
 
   let port = null;
@@ -866,7 +880,9 @@ function getCachedGeminiQuota(cachePath = GEMINI_QUOTA_CACHE_FILE, ttlMs = CACHE
     if (!data || typeof data !== 'object') return null;
 
     const age = Date.now() - (data.timestampMs || 0);
-    const isFresh = age < ttlMs && age >= 0;
+    const isAuthFailure = Boolean(data.lastError && typeof data.lastError === 'object' && data.lastError.kind === 'auth_failure');
+    const isStale = age >= STALE_RETRY_AFTER_MS || age < 0 || isAuthFailure;
+    const isFresh = age < ttlMs && age >= 0 && !isAuthFailure;
 
     let resetFormatted = data.resetFormatted;
     let resetInSeconds = data.resetInSeconds;
@@ -893,6 +909,7 @@ function getCachedGeminiQuota(cachePath = GEMINI_QUOTA_CACHE_FILE, ttlMs = CACHE
       resetFormatted,
       resetInSeconds,
       isFresh,
+      isStale,
       ageMs: age
     };
   } catch (_err) {

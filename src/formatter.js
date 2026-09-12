@@ -818,8 +818,12 @@ function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, li
     `${t('hookBadgeCache')}: ${styleText(cacheHit, 'cyan')}`
   ];
 
-  if (badgeData.geminiQuota && badgeData.geminiQuota.remainPercent !== null && badgeData.geminiQuota.remainPercent !== undefined) {
-    const gq = badgeData.geminiQuota;
+  const gq = badgeData.geminiQuota;
+  const isGqStale = Boolean(gq && (gq.isStale || (gq.lastError && typeof gq.lastError === 'object' && gq.lastError.kind === 'auth_failure')));
+  const hasValidGq = Boolean(gq && gq.remainPercent !== null && gq.remainPercent !== undefined);
+  const useGq = hasValidGq && (!isGqStale || !badgeData.rollingUsage);
+
+  if (useGq) {
     const staleMark = quotaStalenessMarker(gq);
     if (gq.quota5h || gq.quota7d) {
       if (gq.quota5h && gq.quota5h.remainPercent !== null && gq.quota5h.remainPercent !== undefined) {
@@ -848,8 +852,9 @@ function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, li
     const r7d = Number.isFinite(ru.remain7dPercent) ? ru.remain7dPercent : 100;
     const bar5 = formatMiniBar(r5h, 5);
     const bar7 = formatMiniBar(r7d, 5);
-    const q5h = `${t('quota5h') || '5h'}: ${styleText(bar5, 'cyan')} ${Math.round(r5h)}%`;
-    const q7d = `${t('quota7d') || '7d'}: ${styleText(bar7, 'cyan')} ${Math.round(r7d)}%`;
+    const estSuffix = isGqStale ? ' (est)' : '';
+    const q5h = `${t('quota5h') || '5h'}: ${styleText(bar5, 'cyan')} ${Math.round(r5h)}%${estSuffix}`;
+    const q7d = `${t('quota7d') || '7d'}: ${styleText(bar7, 'cyan')} ${Math.round(r7d)}%${estSuffix}`;
     segments.push(q5h, q7d);
   }
 

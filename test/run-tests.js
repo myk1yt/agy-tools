@@ -3343,46 +3343,58 @@ async function runAllTests() {
     const htmlReport = require('../src/html-report');
 
     await test('parseCommandLine should extract csrfToken, port, and protocol from arguments (hyphen and underscore variants)', () => {
-      const cmd1 = '"C:\\path\\language_server_windows_x64.exe" --api_url http://127.0.0.1:54321 --csrf_token my-secret-csrf-token --other_flag';
-      const res1 = geminiQuota.parseCommandLine(cmd1);
-      assert.strictEqual(res1.csrfToken, 'my-secret-csrf-token');
-      assert.strictEqual(res1.port, 54321);
-      assert.strictEqual(res1.protocol, 'http');
+      const origAntigravityToken = process.env.ANTIGRAVITY_CSRF_TOKEN;
+      const origCsrfToken = process.env.CSRF_TOKEN;
+      try {
+        delete process.env.ANTIGRAVITY_CSRF_TOKEN;
+        delete process.env.CSRF_TOKEN;
 
-      const cmd2 = '/usr/bin/language_server --port=8089 --csrf-token=tok_998877';
-      const res2 = geminiQuota.parseCommandLine(cmd2);
-      assert.strictEqual(res2.csrfToken, 'tok_998877');
-      assert.strictEqual(res2.port, 8089);
-      assert.strictEqual(res2.protocol, null);
+        const cmd1 = '"C:\\path\\language_server_windows_x64.exe" --api_url http://127.0.0.1:54321 --csrf_token my-secret-csrf-token --other_flag';
+        const res1 = geminiQuota.parseCommandLine(cmd1);
+        assert.strictEqual(res1.csrfToken, 'my-secret-csrf-token');
+        assert.strictEqual(res1.port, 54321);
+        assert.strictEqual(res1.protocol, 'http');
 
-      const cmd3 = 'language_server --manager-port 7777 --csrf_token auth-abc-123';
-      const res3 = geminiQuota.parseCommandLine(cmd3);
-      assert.strictEqual(res3.csrfToken, 'auth-abc-123');
-      assert.strictEqual(res3.port, 7777);
-      assert.strictEqual(res3.protocol, null);
+        const cmd2 = '/usr/bin/language_server --port=8089 --csrf-token=tok_998877';
+        const res2 = geminiQuota.parseCommandLine(cmd2);
+        assert.strictEqual(res2.csrfToken, 'tok_998877');
+        assert.strictEqual(res2.port, 8089);
+        assert.strictEqual(res2.protocol, null);
 
-      const cmd4 = 'language_server --api-url 127.0.0.1:8888 --csrf-token hyphen-tok';
-      const res4 = geminiQuota.parseCommandLine(cmd4);
-      assert.strictEqual(res4.csrfToken, 'hyphen-tok');
-      assert.strictEqual(res4.port, 8888);
-      assert.strictEqual(res4.protocol, null);
+        const cmd3 = 'language_server --manager-port 7777 --csrf_token auth-abc-123';
+        const res3 = geminiQuota.parseCommandLine(cmd3);
+        assert.strictEqual(res3.csrfToken, 'auth-abc-123');
+        assert.strictEqual(res3.port, 7777);
+        assert.strictEqual(res3.protocol, null);
 
-      const cmd5 = 'language_server --api_url https://127.0.0.1:54631 --csrf_token sec-token';
-      const res5 = geminiQuota.parseCommandLine(cmd5);
-      assert.strictEqual(res5.csrfToken, 'sec-token');
-      assert.strictEqual(res5.port, 54631);
-      assert.strictEqual(res5.protocol, 'https');
+        const cmd4 = 'language_server --api-url 127.0.0.1:8888 --csrf-token hyphen-tok';
+        const res4 = geminiQuota.parseCommandLine(cmd4);
+        assert.strictEqual(res4.csrfToken, 'hyphen-tok');
+        assert.strictEqual(res4.port, 8888);
+        assert.strictEqual(res4.protocol, null);
 
-      const cmd6 = 'language_server --api-url=https://localhost:4433 --csrf-token=hyphen-sec';
-      const res6 = geminiQuota.parseCommandLine(cmd6);
-      assert.strictEqual(res6.csrfToken, 'hyphen-sec');
-      assert.strictEqual(res6.port, 4433);
-      assert.strictEqual(res6.protocol, 'https');
+        const cmd5 = 'language_server --api_url https://127.0.0.1:54631 --csrf_token sec-token';
+        const res5 = geminiQuota.parseCommandLine(cmd5);
+        assert.strictEqual(res5.csrfToken, 'sec-token');
+        assert.strictEqual(res5.port, 54631);
+        assert.strictEqual(res5.protocol, 'https');
 
-      const resEmpty = geminiQuota.parseCommandLine('');
-      assert.strictEqual(resEmpty.csrfToken, null);
-      assert.strictEqual(resEmpty.port, null);
-      assert.strictEqual(resEmpty.protocol, null);
+        const cmd6 = 'language_server --api-url=https://localhost:4433 --csrf-token=hyphen-sec';
+        const res6 = geminiQuota.parseCommandLine(cmd6);
+        assert.strictEqual(res6.csrfToken, 'hyphen-sec');
+        assert.strictEqual(res6.port, 4433);
+        assert.strictEqual(res6.protocol, 'https');
+
+        const resEmpty = geminiQuota.parseCommandLine('');
+        assert.strictEqual(resEmpty.csrfToken, null);
+        assert.strictEqual(resEmpty.port, null);
+        assert.strictEqual(resEmpty.protocol, null);
+      } finally {
+        if (origAntigravityToken !== undefined) process.env.ANTIGRAVITY_CSRF_TOKEN = origAntigravityToken;
+        else delete process.env.ANTIGRAVITY_CSRF_TOKEN;
+        if (origCsrfToken !== undefined) process.env.CSRF_TOKEN = origCsrfToken;
+        else delete process.env.CSRF_TOKEN;
+      }
     });
 
     await test('extractPortFromNetstat should parse listening port for specific PID', () => {
@@ -4171,6 +4183,117 @@ async function runAllTests() {
       assert(typeof geminiQuota.discoverLanguageServer === 'function');
       const parsed = geminiQuota.parseCommandLine('agy.exe --api_url https://127.0.0.1:60125 --csrf_token tok-123');
       assert.strictEqual(parsed.csrfToken, 'tok-123', 'command-line token path must remain first priority');
+    });
+
+    await test('parseCommandLine should discover token from ANTIGRAVITY_CSRF_TOKEN and CSRF_TOKEN env vars', () => {
+      const origAntigravityToken = process.env.ANTIGRAVITY_CSRF_TOKEN;
+      const origCsrfToken = process.env.CSRF_TOKEN;
+      try {
+        delete process.env.ANTIGRAVITY_CSRF_TOKEN;
+        delete process.env.CSRF_TOKEN;
+
+        // Without env vars, parses CLI
+        const p1 = geminiQuota.parseCommandLine('agy.exe --csrf_token cli-tok');
+        assert.strictEqual(p1.csrfToken, 'cli-tok');
+
+        // CLI token takes first priority
+        process.env.ANTIGRAVITY_CSRF_TOKEN = 'env-tok-agy';
+        const p2 = geminiQuota.parseCommandLine('agy.exe --csrf_token cli-tok');
+        assert.strictEqual(p2.csrfToken, 'cli-tok');
+
+        // Falls back to ANTIGRAVITY_CSRF_TOKEN when missing from command line
+        const p3 = geminiQuota.parseCommandLine('agy.exe --api_url https://127.0.0.1:60125');
+        assert.strictEqual(p3.csrfToken, 'env-tok-agy');
+
+        // Works even with empty/missing command line
+        const p4 = geminiQuota.parseCommandLine(null);
+        assert.strictEqual(p4.csrfToken, 'env-tok-agy');
+
+        // CSRF_TOKEN used when ANTIGRAVITY_CSRF_TOKEN is not set
+        delete process.env.ANTIGRAVITY_CSRF_TOKEN;
+        process.env.CSRF_TOKEN = 'env-tok-csrf';
+        const p5 = geminiQuota.parseCommandLine('agy.exe');
+        assert.strictEqual(p5.csrfToken, 'env-tok-csrf');
+      } finally {
+        if (origAntigravityToken !== undefined) process.env.ANTIGRAVITY_CSRF_TOKEN = origAntigravityToken;
+        else delete process.env.ANTIGRAVITY_CSRF_TOKEN;
+        if (origCsrfToken !== undefined) process.env.CSRF_TOKEN = origCsrfToken;
+        else delete process.env.CSRF_TOKEN;
+      }
+    });
+
+    await test('getCachedGeminiQuota marks isStale: true on age >= 5m or auth_failure', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-quota-stale-'));
+      const cachePath = path.join(tempDir, 'quota_cache.json');
+      try {
+        const now = Date.now();
+        // 1. Fresh cache (< 30s)
+        fs.writeFileSync(cachePath, JSON.stringify({
+          version: 2,
+          timestampMs: now - 5000,
+          remainPercent: 95
+        }), 'utf8');
+        const q1 = geminiQuota.getCachedGeminiQuota(cachePath, 30000);
+        assert.strictEqual(q1.isFresh, true);
+        assert.strictEqual(q1.isStale, false);
+
+        // 2. Cache older than 5m
+        fs.writeFileSync(cachePath, JSON.stringify({
+          version: 2,
+          timestampMs: now - 6 * 60 * 1000,
+          remainPercent: 95
+        }), 'utf8');
+        const q2 = geminiQuota.getCachedGeminiQuota(cachePath, 30000);
+        assert.strictEqual(q2.isFresh, false);
+        assert.strictEqual(q2.isStale, true);
+
+        // 3. Recent cache (< 30s) but with auth_failure
+        fs.writeFileSync(cachePath, JSON.stringify({
+          version: 2,
+          timestampMs: now - 5000,
+          remainPercent: 95,
+          lastError: { kind: 'auth_failure', detail: 'HTTP 401' }
+        }), 'utf8');
+        const q3 = geminiQuota.getCachedGeminiQuota(cachePath, 30000);
+        assert.strictEqual(q3.isFresh, false);
+        assert.strictEqual(q3.isStale, true);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('renderRealTimeBadge seamlessly falls back to rollingUsage with (est) when geminiQuota is stale', () => {
+      const prevCols = process.env.COLUMNS;
+      process.env.COLUMNS = '200';
+      try {
+        const staleQuota = {
+          remainPercent: 97,
+          quota5h: { remainPercent: 97, window: '5h' },
+          quota7d: { remainPercent: 83, window: 'weekly' },
+          isLive: false,
+          isFresh: false,
+          isStale: true,
+          lastError: { kind: 'auth_failure', detail: 'HTTP 401' }
+        };
+
+        const rolling = {
+          remain5hPercent: 71,
+          remain7dPercent: 85
+        };
+
+        const badge = formatter.stripAnsi(formatter.renderRealTimeBadge({
+          turnTokens: 100, turnCostUsd: 0.001, todayTokens: 1000, todayCostUsd: 0.01,
+          cacheHitRate: 50,
+          geminiQuota: staleQuota,
+          rollingUsage: rolling
+        }, 'usd', false));
+
+        assert(!badge.includes('97%'), `Badge must NOT show stale 97%, got: ${badge}`);
+        assert(badge.includes('71% (est)'), `Badge must show rolling 5h quota with (est), got: ${badge}`);
+        assert(badge.includes('85% (est)'), `Badge must show rolling 7d quota with (est), got: ${badge}`);
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+      }
     });
   });
 
