@@ -24,6 +24,10 @@ test/test-cache-*.json
 *.log
 *.out
 
+# Scratch working scripts (one-off diagnostics) and env feedback reports — local artifacts
+scratch/
+docs/feedbacks/
+
 # Historical session artifacts, scratch reports & one-off verification files
 docs/*_session_*/
 docs/*-session-*/
