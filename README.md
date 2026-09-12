@@ -22,7 +22,9 @@ This suite provisions global governance rules, multi-agent lifecycle orchestrati
 │   └── hooks.json                  # Antigravity PostInvocation turn badge lifecycle hook
 ├── scripts/
 │   ├── install.bat                 # 1-click Windows installer (installs into %USERPROFILE%\.gemini)
-│   └── install.sh                  # 1-click macOS/Linux installer (installs into ~/.gemini)
+│   ├── install.sh                  # 1-click macOS/Linux installer (installs into ~/.gemini)
+│   ├── uninstall.bat               # 1-click Windows uninstaller (removes ONLY this bundle's files)
+│   └── uninstall.sh                # 1-click macOS/Linux uninstaller (removes ONLY this bundle's files)
 ├── LICENSE                         # MIT License (Copyright (c) 2026 kim,yong-tai)
 └── README.md                       # Documentation and usage guide
 ```
@@ -45,6 +47,23 @@ chmod +x scripts/install.sh
 The installer automatically copies all rules, skills, and hooks into your global Antigravity/Gemini configuration home:
 - **Windows**: `%USERPROFILE%\.gemini\`
 - **macOS / Linux**: `~/.gemini/`
+
+### Uninstallation
+
+To remove this configuration bundle from your machine, run the matching uninstaller. It deletes **only** the files this bundle installed (rules, the two global skills, and `hooks.json`) — nothing else in your `~/.gemini` directory is touched.
+
+**Windows (Command Prompt / PowerShell):**
+```cmd
+scripts\uninstall.bat
+```
+
+**macOS / Linux:**
+```bash
+chmod +x scripts/uninstall.sh
+./scripts/uninstall.sh
+```
+
+After running it, these paths will no longer exist: `~/.gemini/rules/AGENTS.md`, `~/.gemini/rules/GEMINI.md`, `~/.gemini/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.gemini/skills/usage/`, `~/.gemini/skills/autonomous-orchestrator/`, `~/.gemini/hooks/hooks.json`.
 
 ---
 
