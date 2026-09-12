@@ -824,7 +824,11 @@ function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, li
   const gq = badgeData.geminiQuota;
   const isGqStale = Boolean(gq && (gq.isStale || (gq.lastError && typeof gq.lastError === 'object' && gq.lastError.kind === 'auth_failure')));
   const hasValidGq = Boolean(gq && gq.remainPercent !== null && gq.remainPercent !== undefined);
-  const useGq = hasValidGq && (!isGqStale || !badgeData.rollingUsage);
+  // Design 000815 §4.3/§4.4: a real quota snapshot (Priority 4) outranks the
+  // local rolling ESTIMATE (Priority 5) even when stale or auth-failed — the
+  // `!`/`*` staleness marker carries the freshness caveat instead of hiding
+  // the measurement. ESTIMATE renders only when geminiQuota is absent.
+  const useGq = hasValidGq;
 
   if (useGq) {
     const staleMark = quotaStalenessMarker(gq);

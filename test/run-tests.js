@@ -4334,7 +4334,7 @@ async function runAllTests() {
       }
     });
 
-    await test('renderRealTimeBadge seamlessly falls back to rollingUsage with (est) when geminiQuota is stale', () => {
+    await test('renderRealTimeBadge renders stale real quota with ! marker (never demoted to rolling est) per design 000815 §4.3/§4.4', () => {
       const prevCols = process.env.COLUMNS;
       process.env.COLUMNS = '200';
       try {
@@ -4360,9 +4360,32 @@ async function runAllTests() {
           rollingUsage: rolling
         }, 'usd', false));
 
-        assert(!badge.includes('97%'), `Badge must NOT show stale 97%, got: ${badge}`);
-        assert(badge.includes('71% (est)'), `Badge must show rolling 5h quota with (est), got: ${badge}`);
-        assert(badge.includes('85% (est)'), `Badge must show rolling 7d quota with (est), got: ${badge}`);
+        // Priority 4 (stale REAL snapshot + `!` marker) > Priority 5 (ESTIMATE):
+        // the real measurement must stay visible with its staleness marker,
+        // and the local rolling estimate must NOT take over the badge.
+        assert(badge.includes('97%!'), `Badge must show stale real 5h quota with ! marker, got: ${badge}`);
+        assert(badge.includes('83%!'), `Badge must show stale real 7d quota with ! marker, got: ${badge}`);
+        assert(!badge.includes('(est)'), `Badge must NOT demote to rolling estimate, got: ${badge}`);
+        assert(!badge.includes('71%'), `Badge must not show rolling 5h estimate, got: ${badge}`);
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+      }
+    });
+
+    await test('renderRealTimeBadge renders rolling estimate only when geminiQuota is absent (null)', () => {
+      const prevCols = process.env.COLUMNS;
+      process.env.COLUMNS = '200';
+      try {
+        const badge = formatter.stripAnsi(formatter.renderRealTimeBadge({
+          turnTokens: 100, turnCostUsd: 0.001, todayTokens: 1000, todayCostUsd: 0.01,
+          cacheHitRate: 50,
+          geminiQuota: null,
+          rollingUsage: { remain5hPercent: 71, remain7dPercent: 85 }
+        }, 'usd', false));
+
+        // ESTIMATE is the only source when no real snapshot exists at all.
+        assert(badge.includes('71%'), `Badge must show rolling 5h estimate, got: ${badge}`);
+        assert(badge.includes('85%'), `Badge must show rolling 7d estimate, got: ${badge}`);
       } finally {
         if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
       }
