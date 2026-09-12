@@ -137,7 +137,7 @@ Antigravity CLI에서 호출: `/agent` → `designer` 선택, 또는 `@designer`
 
 > **브랜치**: [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) · **작성자**: myk1yt · **버전**: 1.0.0
 
-OWASP Top 10, CWE Top 25, Google Cloud `roles/iam.securityReviewer` 최소 권한 원칙을 기반으로 한 엔터프라이즈급 보안 감사 스위트입니다. 리드 오케스트레이터가 4개의 전문 도메인 인스펙터를 동시에 디스패치하여 종합적인 보안 감사를 수행합니다.
+사전 커밋 보안 감사를 위해 전문 서브에이전트를 조율하는 리드 보안 감사관: OWASP/CWE 웹 결함, 비밀키/자격증명, 클라우드/IaC 및 Antigravity MCP 권한 감사.
 
 **4개 도메인 인스펙터 서브에이전트:**
 

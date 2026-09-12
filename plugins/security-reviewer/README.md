@@ -4,7 +4,7 @@
 [![Security Auditing](https://img.shields.io/badge/Audit-OWASP%20%7C%20CWE%20%7C%20IAM-red.svg)](#overview-of-specialized-domain-inspectors)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#quick-start-one-click-installation)
 
-An enterprise multi-agent security audit suite for Google Antigravity. Built on Everything Gemini Code (EGC) pre-commit quality gate patterns, OWASP Top 10, CWE Top 25, and Google Cloud `roles/iam.securityReviewer` least-privilege principles, Security Reviewer orchestrates 4 specialized domain inspectors to conduct deep, read-only security audits across your codebase.
+Lead Security Reviewer orchestrating specialized domain subagents for pre-commit audits: OWASP/CWE, Secrets/Credentials, Cloud/IaC, and Antigravity MCP privileges. Built on Everything Gemini Code (EGC) pre-commit quality gate patterns, OWASP Top 10, CWE Top 25, and Google Cloud `roles/iam.securityReviewer` least-privilege principles, Security Reviewer orchestrates 4 specialized domain inspectors to conduct deep, read-only security audits across your codebase.
 
 ---
 

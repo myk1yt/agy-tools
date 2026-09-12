@@ -1,7 +1,7 @@
 {
     "version":  "1.0.0",
     "name":  "security_reviewer",
-    "description":  "Enterprise Security Reviewer multi-agent suite based on EGC OWASP/CWE and GCP iam.securityReviewer patterns",
+    "description":  "Lead Security Reviewer orchestrating specialized domain subagents for pre-commit audits: OWASP/CWE, Secrets/Credentials, Cloud/IaC, and Antigravity MCP privileges.",
     "author":  "myk1yt",
     "keywords":  [
                      "antigravity",
