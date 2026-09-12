@@ -99,6 +99,84 @@ flowchart TD
 
 ---
 
+## 🧭 Beginner Guide: Installing Any Branch (No Command-Line Experience Needed)
+
+This section is for first-time users. Follow it top to bottom and you will get any of the 4 non-main branches working — no prior git or terminal knowledge required.
+
+### Why `git checkout` first?
+
+This repository keeps each add-on in a **separate git branch** (like a separate room in the same house). The folder you downloaded contains files for ONE branch at a time. `git checkout <branch>` is the command that opens a specific room: **it swaps the visible files in your folder to that branch's files**, so the installer you run afterwards actually finds (for example) `plugins/designer/`. If you skip the checkout, the installer reports "plugin.json not found" because the files simply are not in your folder yet.
+
+### Step-by-step (Windows, no terminal experience required)
+
+1. **Open the branch switcher window**
+   - In File Explorer, open the folder where you cloned/downloaded `agy-tools` (the folder that has `README.md` inside).
+   - Hold **Shift** and **right-click an empty space** inside the folder → click **"Open PowerShell window here"** (or "여기에 PowerShell 창 열기" on a Korean Windows).
+   - A blue/white PowerShell window opens with your folder already selected as its working directory.
+
+2. **Look around (what you will see after each step)**
+   - After step 1 you see the files of whatever branch is currently checked out.
+   - After `git checkout Agent/designer`, the folder contents change to the designer branch: a new `plugins/designer/` folder appears and files from other branches disappear. That is normal — no files were deleted; switching branches just shows a different snapshot.
+
+3. **Pick the branch you want and run its commands**
+   - Type the branch checkout, press Enter, then run the branch's installer, press Enter:
+   ```powershell
+   # Designer (AI drawing/design agent)
+   git checkout Agent/designer
+   powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1
+
+   # Security Reviewer (security audit agents)
+   git checkout Agent/security-reviewer
+   powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1
+
+   # Governance config bundle (rules + skills + hooks, NOT a plugin)
+   git checkout gemini-config
+   scripts\install.bat
+   ```
+   - For `main` (the token tracker core) no checkout is needed if you just cloned — run `scripts\install.bat`.
+
+4. **Verify it worked**
+   - Any of the above installers ends with a list of active agents. You should see your new agent name there (e.g. `designer` or `security-reviewer`).
+   - Or run this anytime:
+   ```powershell
+   agy agents
+   ```
+
+5. **Real usage examples (what you actually do with it)**
+   - **Designer**: In the Antigravity chat input type `@designer` and then your request, for example:
+     - `@designer draw a 680px SVG architecture diagram of a 3-tier web app`
+     - `@designer build an interactive HTML widget with a slider that changes a 3D torus rotation speed`
+   - **Security Reviewer**: In the Antigravity chat input type `@security-reviewer` plus the code/folder you want audited, for example:
+     - `@security-reviewer audit this repository for hard-coded API keys and OWASP issues`
+     - `@security-reviewer check the IAM roles in deploy/terraform/ for least privilege violations`
+   - **gemini-config**: Nothing to type — after installing, Antigravity automatically loads the governance rules; `/usage` becomes available as a slash command to see token cost analytics.
+
+6. **Uninstall (when you no longer want it)**
+   - Stay in the SAME branch as the thing you installed (use `git checkout Agent/designer` again if needed), then:
+   ```powershell
+   # Designer
+   powershell -ExecutionPolicy Bypass -File scripts/uninstall-designer.ps1
+   # Security Reviewer
+   powershell -ExecutionPolicy Bypass -File scripts/uninstall-security-reviewer.ps1
+   # gemini-config
+   scripts\uninstall.bat
+   ```
+   - Run `agy agents` afterwards: the agent name should be gone.
+
+### Frequent errors and the surest fix right now
+
+| Symptom | Why it happens | Surest fix |
+|---|---|---|
+| PowerShell prints `<path>-File : 잘못된 인수` / `-File` value is cut short, e.g. only `...install-` then stops | The command was pasted from a webpage with a line break or smart quotes inside the path | Type the command by hand OR paste into Notepad first, fix broken lines/quotes, then run. Avoid quotes containing pasted spaces at the end |
+| Endless repeated yellow/red `TLS ... handshake` / network flood in the terminal right after install | The statusline quota probe hammers the local Language Server when Antigravity is not running (pre-fix builds) | Update to the newest `main` (it contains a TLS probe cooldown guard), or run `scripts\uninstall.bat` on `main` to remove the statusline hook |
+| `agy` is not recognized | The Antigravity CLI is not installed, or PATH does not include it | Install Antigravity CLI first; reopen the PowerShell window (a fresh window re-reads PATH) |
+| `plugin.json not found` when running an installer | You ran the installer before switching branches | Run `git checkout <branch>` FIRST (see step 3), confirm the branch's folder exists, then run the installer again |
+| PowerShell says script execution is disabled | Windows default policy blocks .ps1 files | Always launch through: `powershell -ExecutionPolicy Bypass -File scripts\...ps1` exactly as written in this README |
+
+> Each branch also has its own `README.md` with details specific to that branch (open it after checking out that branch).
+
+---
+
 ## 🎨 Agent Plugins
 
 ### `@designer` — Zero-MCP Self-Contained Design Specialist
@@ -222,6 +300,25 @@ chmod +x scripts/install.sh && ./scripts/install.sh
 ```bash
 agy-tokens --html --open
 ```
+
+### 3️⃣ Updating your npm global copy (important: runtime uses the global copy)
+
+The statusline and `agy-tokens` commands run from the **npm global installation**, not directly from this cloned folder. After you `git pull` (or switch branches and re-run the installer), refresh the global copy so the runtime matches the repo:
+
+**Install fresh globally from this repo (Windows):**
+```cmd
+cd agy-tools
+npm install -g .
+```
+
+**Update later (after `git pull`):** run the same `npm install -g .` again — this re-links the newest source into `C:\Users\<you>\AppData\Roaming\npm\node_modules\agy-tools\`.
+
+Verify which copy actually runs and where it lives:
+```cmd
+agy-tokens --version
+where agy-tokens
+```
+If the `where` output does not point at `AppData\Roaming\npm`, the old copy is shadowing the new one: close and reopen the terminal (PATH refresh) and rerun `npm install -g .`.
 
 ---
 
