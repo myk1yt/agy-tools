@@ -86,63 +86,67 @@ flowchart TD
     Dash -->|Merged & Superseded| Core
 ```
 
-| Branch | Description | Key Capabilities | Quick Start |
-|---|---|---|---|
-| [`main`](https://github.com/myk1yt/agy-tools/tree/main) | **Core Engine & Developer Toolkit** | Statusline badge, SSE Web Dashboard, 1:1 Gemini Quota Pool RPC, Dynamic Pricing, 21 languages | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` |
-| [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) | **Zero-MCP Design Specialist** | `@designer` agent, 5 modular add-on modules (SVG, 3D Canvas, Cyberpunk, Sandbox, QA Harness) | `git checkout Agent/designer && powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1` |
-| [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) | **Enterprise Multi-Agent Security Audit** | `@security-reviewer` orchestrator + 4 domain inspectors (OWASP, IAM, Credentials, Supply Chain) | `git checkout Agent/security-reviewer && powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1` |
-| [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config) | **Autonomous Multi-Agent Governance** | 7-Stage Lifecycle Protocol, Master Zero-Source-Edit Invariant, orchestrator governance | `git checkout gemini-config && scripts\install.bat` |
-| [`dashboard`](https://github.com/myk1yt/agy-tools/tree/dashboard) | **Historical Prototype** | Original token tracker foundation (fully merged into `main`) | — |
+| Branch | Description | Key Capabilities | One-Shot Install (paste into **Command Prompt**) | One-Shot Install (paste into **PowerShell**) | One-Shot Install (paste into **macOS / Linux terminal**) |
+|---|---|---|---|---|---|
+| [`main`](https://github.com/myk1yt/agy-tools/tree/main) | **Core Engine & Developer Toolkit** | Statusline badge, SSE Web Dashboard, 1:1 Gemini Quota Pool RPC, Dynamic Pricing, 21 languages | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` | `cmd /c "git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"` | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh` |
+| [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) | **Zero-MCP Design Specialist** | `@designer` agent, 5 modular add-on modules (SVG, 3D Canvas, Cyberpunk, Sandbox, QA Harness) | `git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1` | `cmd /c "git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1"` | `git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-designer.sh` |
+| [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) | **Enterprise Multi-Agent Security Audit** | `@security-reviewer` orchestrator + 4 domain inspectors (OWASP, IAM, Credentials, Supply Chain) | `git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-security-reviewer.ps1` | `cmd /c "git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-security-reviewer.ps1"` | `git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-security-reviewer.sh` |
+| [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config) | **Autonomous Multi-Agent Governance** | 7-Stage Lifecycle Protocol, Master Zero-Source-Edit Invariant, orchestrator governance | `git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` | `cmd /c "git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"` | `git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh` |
+| [`dashboard`](https://github.com/myk1yt/agy-tools/tree/dashboard) | **Historical Prototype** | Original token tracker foundation (fully merged into `main`) | — | — | — |
 
 > [!TIP]
-> Each branch is self-contained with its own 1-click install/uninstall scripts. Switch branches with `git checkout <branch>` before running installers.
+> Each row is a **complete, one-shot command for a fresh machine**: `git clone -b <branch>` checks the branch out *during* the clone, so there is no manual `git checkout` step left to forget (the classic "plugin.json not found" trap). The clone+checkout+installer chain is plain `&&`, which works in Command Prompt, bash (macOS/Linux) and PowerShell 7+. In the default **Windows PowerShell 5.1**, `&&` is not a valid separator — that is why every row also ships a `cmd /c "..."` wrapped version: paste *that one line* into a PowerShell window and it still runs end to end.
+
+#### Install the prerequisites first (git + Node.js) — also one shot
+
+`git` ships with Visual Studio Code and most developer setups; if it is genuinely missing, install it with `winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements` first. Node.js is required **only for `main`** (the `Agent/*` plugin branches call `agy`, not `node`), and is a one-liner per platform:
+
+```powershell
+# Windows — install Node.js LTS (skip if `node --version` already works)
+winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements
+```
+
+```bash
+# macOS (Homebrew)
+brew install node
+
+# Debian / Ubuntu
+sudo apt-get update && sudo apt-get install -y nodejs npm
+```
+
+After installing via winget, **open a brand-new terminal window** before running the install one-liner — a fresh window re-reads PATH so `node` becomes visible.
 
 ---
 
 ## 🧭 Beginner Guide: Installing Any Branch (No Command-Line Experience Needed)
 
-This section is for first-time users. Follow it top to bottom and you will get any of the 4 non-main branches working — no prior git or terminal knowledge required.
+This section is for first-time users. Follow it top to bottom and you will get any of the 4 installable branches (including `main`) working — no prior git or terminal knowledge required.
 
-### Why `git checkout` first?
+### Why `git clone -b <branch>` instead of `git checkout`?
 
-This repository keeps each add-on in a **separate git branch** (like a separate room in the same house). The folder you downloaded contains files for ONE branch at a time. `git checkout <branch>` is the command that opens a specific room: **it swaps the visible files in your folder to that branch's files**, so the installer you run afterwards actually finds (for example) `plugins/designer/`. If you skip the checkout, the installer reports "plugin.json not found" because the files simply are not in your folder yet.
+This repository keeps each add-on in a **separate git branch** (like a separate room in the same house). A plain `git clone` only unpacks ONE room at a time, so running an installer afterwards without switching reports "plugin.json not found" — the files simply are not in your folder yet. The one-shot commands in the table above solve this for a fresh machine: `git clone -b <branch>` **checks the branch out during the clone itself**, so there is no separate `git checkout` step left to forget. (Use `git checkout <branch>` only when you already cloned the repo earlier and want to switch rooms in the same folder.)
 
 ### Step-by-step (Windows, no terminal experience required)
 
-1. **Open the branch switcher window**
-   - In File Explorer, open the folder where you cloned/downloaded `agy-tools` (the folder that has `README.md` inside).
-   - Hold **Shift** and **right-click an empty space** inside the folder → click **"Open PowerShell window here"** (or "여기에 PowerShell 창 열기" on a Korean Windows).
-   - A blue/white PowerShell window opens with your folder already selected as its working directory.
+1. **Open a terminal in any folder** (it does not matter where — the command creates its own `agy-tools` folder)
+   - Press **Win + R**, type `powershell`, press Enter. (Or use Command Prompt — both work, see step 2.)
 
-2. **Look around (what you will see after each step)**
-   - After step 1 you see the files of whatever branch is currently checked out.
-   - After `git checkout Agent/designer`, the folder contents change to the designer branch: a new `plugins/designer/` folder appears and files from other branches disappear. That is normal — no files were deleted; switching branches just shows a different snapshot.
-
-3. **Pick the branch you want and run its commands**
-   - Type the branch checkout, press Enter, then run the branch's installer, press Enter:
+2. **Paste ONE line for the branch you want** — the branch checkout is already built into the command:
+   - **In PowerShell (the blue window):** paste the **`cmd /c "..."` column** version from the branch table above. PowerShell 5.1 does not understand bare `&&`, so the `cmd /c` wrapper is what makes a single paste work.
+   - **In Command Prompt:** paste the **Command Prompt column** version.
+   - What each one-shot line does, in order: ① clones the repo **already switched to the right branch** (`git clone -b <branch>`) → ② `cd agy-tools` → ③ runs that branch's installer. Example (designer, PowerShell):
    ```powershell
-   # Designer (AI drawing/design agent)
-   git checkout Agent/designer
-   powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1
-
-   # Security Reviewer (security audit agents)
-   git checkout Agent/security-reviewer
-   powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1
-
-   # Governance config bundle (rules + governance modules + badge hook, NOT a plugin)
-   git checkout gemini-config
-   scripts\install.bat
+   cmd /c "git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1"
    ```
-   - For `main` (the token tracker core) no checkout is needed if you just cloned — run `scripts\install.bat`.
 
-4. **Verify it worked**
+3. **Verify it worked**
    - Any of the above installers ends with a list of active agents. You should see your new agent name there (e.g. `designer` or `security-reviewer`).
    - Or run this anytime:
    ```powershell
    agy agents
    ```
 
-5. **Real usage examples (what you actually do with it)**
+4. **Real usage examples (what you actually do with it)**
    - **Designer**: In the Antigravity chat input type `@designer` and then your request, for example:
      - `@designer draw a 680px SVG architecture diagram of a 3-tier web app`
      - `@designer build an interactive HTML widget with a slider that changes a 3D torus rotation speed`
@@ -151,8 +155,8 @@ This repository keeps each add-on in a **separate git branch** (like a separate 
      - `@security-reviewer check the IAM roles in deploy/terraform/ for least privilege violations`
    - **gemini-config**: Nothing to type — after installing, Antigravity automatically loads the governance rules and orchestrator governance modules; the statusline badge (via the `statusLine` in settings.json) shows live token analytics every turn.
 
-6. **Uninstall (when you no longer want it)**
-   - Stay in the SAME branch as the thing you installed (use `git checkout Agent/designer` again if needed), then:
+5. **Uninstall (when you no longer want it)**
+   - Open a terminal inside the `agy-tools` folder created by the install (it is already on the right branch thanks to `git clone -b`), then:
    ```powershell
    # Designer
    powershell -ExecutionPolicy Bypass -File scripts/uninstall-designer.ps1
@@ -163,6 +167,8 @@ This repository keeps each add-on in a **separate git branch** (like a separate 
    ```
    - Run `agy agents` afterwards: the agent name should be gone.
 
+> Already cloned the repo before? You do not need to clone again — open a terminal inside the existing `agy-tools` folder, run `git checkout <branch>` (e.g. `git checkout Agent/designer`; the folder contents swap to that branch — nothing is deleted), and then run only the installer part of the one-liner.
+
 ### Frequent errors and the surest fix right now
 
 | Symptom | Why it happens | Surest fix |
@@ -170,7 +176,7 @@ This repository keeps each add-on in a **separate git branch** (like a separate 
 | PowerShell prints `<path>-File : 잘못된 인수` / `-File` value is cut short, e.g. only `...install-` then stops | The command was pasted from a webpage with a line break or smart quotes inside the path | Type the command by hand OR paste into Notepad first, fix broken lines/quotes, then run. Avoid quotes containing pasted spaces at the end |
 | Endless repeated yellow/red `TLS ... handshake` / network flood in the terminal right after install | The statusline quota probe hammers the local Language Server when Antigravity is not running (pre-fix builds) | Update to the newest `main` (it contains a TLS probe cooldown guard), or run `scripts\uninstall.bat` on `main` to remove the statusline hook |
 | `agy` is not recognized | The Antigravity CLI is not installed, or PATH does not include it | Install Antigravity CLI first; reopen the PowerShell window (a fresh window re-reads PATH) |
-| `plugin.json not found` when running an installer | You ran the installer before switching branches | Run `git checkout <branch>` FIRST (see step 3), confirm the branch's folder exists, then run the installer again |
+| `plugin.json not found` when running an installer | You cloned without `-b` and ran the installer on the wrong branch | Re-run the full one-shot line from the branch table (it clones with `-b <branch>`), or `git checkout <branch>` inside the existing `agy-tools` folder first, then run the installer again |
 | PowerShell says script execution is disabled | Windows default policy blocks .ps1 files | Always launch through: `powershell -ExecutionPolicy Bypass -File scripts\...ps1` exactly as written in this README |
 
 > Each branch also has its own `README.md` with details specific to that branch (open it after checking out that branch).
@@ -197,14 +203,20 @@ Autonomous design agent generating mathematically verified UI/UX designs, intera
 
 **Installation & Usage:**
 ```bash
-# 1. Switch to designer branch
+# Fresh machine — one shot (macOS / Linux terminal; checkout happens inside the clone):
+git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-designer.sh
+```
+
+```powershell
+# Fresh machine — one shot (Windows, paste into PowerShell or Command Prompt):
+cmd /c "git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1"
+```
+
+```bash
+# Already cloned earlier? Switch rooms, then install:
 git checkout Agent/designer
-
-# 2. Install (Windows PowerShell)
-powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1
-
-# 2. Install (Linux / macOS)
-bash scripts/install-designer.sh
+powershell -ExecutionPolicy Bypass -File scripts/install-designer.ps1   # Windows
+bash scripts/install-designer.sh                                        # Linux / macOS
 ```
 
 Invoke in Antigravity CLI: `/agent` → select `designer`, or mention `@designer` directly.
@@ -230,14 +242,20 @@ Enterprise-grade security audit suite based on OWASP Top 10, CWE Top 25, and Goo
 
 **Installation & Usage:**
 ```bash
-# 1. Switch to security-reviewer branch
+# Fresh machine — one shot (macOS / Linux terminal; checkout happens inside the clone):
+git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-security-reviewer.sh
+```
+
+```powershell
+# Fresh machine — one shot (Windows, paste into PowerShell or Command Prompt):
+cmd /c "git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-security-reviewer.ps1"
+```
+
+```bash
+# Already cloned earlier? Switch rooms, then install:
 git checkout Agent/security-reviewer
-
-# 2. Install (Windows PowerShell)
-powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1
-
-# 2. Install (Linux / macOS)
-bash scripts/install-security-reviewer.sh
+powershell -ExecutionPolicy Bypass -File scripts/install-security-reviewer.ps1   # Windows
+bash scripts/install-security-reviewer.sh                                        # Linux / macOS
 ```
 
 Invoke in Antigravity CLI: `/agent` → select `security-reviewer`, or mention `@security-reviewer` directly.
@@ -258,14 +276,20 @@ Shareable global configuration bundle that provisions the **7-Stage Multi-Agent 
 
 **Installation:**
 ```bash
-# 1. Switch to gemini-config branch
+# Fresh machine — one shot (macOS / Linux terminal; checkout happens inside the clone):
+git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh
+```
+
+```powershell
+# Fresh machine — one shot (Windows, paste into PowerShell or Command Prompt):
+cmd /c "git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"
+```
+
+```bash
+# Already cloned earlier? Switch rooms, then install:
 git checkout gemini-config
-
-# 2. Install (Windows)
-scripts\install.bat
-
-# 2. Install (Linux / macOS)
-chmod +x scripts/install.sh && ./scripts/install.sh
+scripts\install.bat                              # Windows
+chmod +x scripts/install.sh && ./scripts/install.sh   # Linux / macOS
 ```
 
 ---
@@ -276,21 +300,24 @@ Prerequisites: **Node.js 16+** ([nodejs.org](https://nodejs.org)) and **Antigrav
 
 ### 1️⃣ One-Click Installation (Recommended)
 
-Run the following 3 commands in your terminal. This registers global commands **AND automatically configures the statusline (`statusLine`) hook in `settings.json`**:
+Run ONE line in your terminal (pick the column matching your shell below). This registers global commands **AND automatically configures the statusline (`statusLine`) hook in `settings.json`**:
 
-**Windows (Command Prompt / PowerShell):**
+**Windows — Command Prompt:**
 ```cmd
-git clone https://github.com/myk1yt/agy-tools.git
-cd agy-tools
-scripts\install.bat
+git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat
+```
+
+**Windows — PowerShell (5.1 does not accept bare `&&`, hence the `cmd /c` wrapper):**
+```powershell
+cmd /c "git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"
 ```
 
 **Linux / macOS:**
 ```bash
-git clone https://github.com/myk1yt/agy-tools.git
-cd agy-tools
-chmod +x scripts/install.sh && ./scripts/install.sh
+git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh
 ```
+
+The installer registers the global commands via `npm link`, so no separate `npm install -g .` step is needed on a fresh machine (see section 3️⃣ below for later updates).
 
 ### 2️⃣ Getting Started
 1. **Restart Antigravity CLI (`agy`)**.
