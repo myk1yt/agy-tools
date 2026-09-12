@@ -47,6 +47,21 @@ const PROBE_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
 // marker in between.
 const STALE_RETRY_AFTER_MS = 5 * 60 * 1000; // 5 minutes
 
+// REQ-4 subtask 7.1 (transcript CSRF fallback): bounded, read-only scan of the
+// Antigravity brain transcripts for the `DISCOVERED: {"pid":..,"port":..,
+// "ports":[..],"csrfToken":"<uuid>"}` discovery log that agy.exe writes when
+// the Language Server starts (design §2.3; verified in
+// docs/260912_0003_session_restore-real-usage-quota/000508_debug-csrf-vectors-report.md §2.1).
+// Files are processed newest-mtime first and anything over the size cap is
+// skipped so a statusline-triggered background refresh never stalls on I/O.
+const TRANSCRIPT_SCAN_MAX_FILES = 300;
+const TRANSCRIPT_SCAN_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+// Wall-clock budget for one scan pass: newest-mtime-first means the current
+// session's record is normally found in the first handful of files; the
+// deadline bounds the worst case (300 files x 10MB) so no caller path can
+// stall indefinitely.
+const TRANSCRIPT_SCAN_MAX_DURATION_MS = 5000;
+
 /**
  * Reads the snapshot age basis (`timestampMs`) from the quota cache file.
  * Returns null when the cache is missing/unreadable (no snapshot to defend).
@@ -180,7 +195,9 @@ function recordQuotaAttemptFailure(info = {}, cachePath = GEMINI_QUOTA_CACHE_FIL
  * @param {string} [info.reason] - 'language_server_probe_failed' (server unreachable /
  *   no quota pool) or 'auth_failure' (server reachable, HTTP 401 — CSRF token missing/invalid).
  * @param {string} [info.detail] - Short sanitized failure detail for offline diagnosis.
- * @param {string} [info.tokenSource] - Token source used for the attempt ('command_line' | 'none').
+ * @param {string} [info.tokenSource] - REQ-4 §3.2 token source enum used for the
+ *   attempt: 'command_line' | 'transcript' | 'heap_scan' (reserved, §7.5) | 'none'.
+ *   Only the SOURCE KIND is recorded — never the token plaintext (design §5).
  */
 function writeProbeCooldown(markerPath = PROBE_COOLDOWN_MARKER, info = {}) {
   try {
@@ -464,6 +481,225 @@ async function discoverLanguageServer(opts = {}) {
       });
     }
   });
+}
+
+/**
+ * REQ-4 subtask 7.1 (design §2.3): strict CSRF token shape check — UUID
+ * format, exactly 36 hex/dash chars. Malformed captures are never used.
+ * @param {string} token
+ * @returns {boolean}
+ */
+function isCsrfUuid(token) {
+  return typeof token === 'string' &&
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(token);
+}
+
+// Discovery-log patterns recorded into brain transcripts by agy.exe when the
+// Language Server starts (design §2.3; verbatim formats evidenced in
+// docs/260912_0003_session_restore-real-usage-quota/000508_debug-csrf-vectors-report.md §2.1).
+// Unified group layout for both patterns: 1=pid, 2=port, 3=ports[] (optional),
+// 4=csrfToken. Pattern A's ports group is optional because older builds logged
+// without it; Pattern B requires it (evidenced verbatim in debug report §2.1:
+// `DISCOVERED: {"pid":34784,"port":60462,"ports":[60462,60463],"csrfToken":"..."}`).
+const TRANSCRIPT_DISCOVERY_PATTERNS = [
+  // Pattern A: log-line form — `DISCOVERED: {"pid":123,"port":55,"ports":[..],"csrfToken":"<uuid>"...}`
+  /DISCOVERED:\s*\{\s*"pid":(\d+),"port":(\d+)(?:,"ports":\[\s*([\d,\s]*)\s*\])?[^{}]*"csrfToken":"([0-9a-fA-F-]{36})"/g,
+  // Pattern B: serialized JSON form — `"pid":123,"port":55,"ports":[55,56],"csrfToken":"<uuid>"`
+  /"pid":(\d+),"port":(\d+),"ports":\[\s*([\d,\s]*)\s*\][^{}]*"csrfToken":"([0-9a-fA-F-]{36})"/g
+];
+
+/**
+ * Extracts every discovery hit (pid/port(s)/csrfToken) from transcript file
+ * content in source order (earliest first). JSONL-escaped quotes (\") are
+ * unescaped first so transcript*.jsonl embeddings match the same patterns as
+ * plain output.txt. Pure function — unit-testable without the fs.
+ * @param {string} content
+ * @returns {Array<{pid:number,port:number,ports:Array<number>,csrfToken:string}>}
+ */
+function extractDiscoveryHits(content) {
+  const hits = [];
+  if (typeof content !== 'string' || content.length === 0) return hits;
+  const text = content.replace(/\\"/g, '"');
+  const seen = new Set();
+  for (const re of TRANSCRIPT_DISCOVERY_PATTERNS) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const token = m[4];
+      if (!isCsrfUuid(token)) continue;
+      const ports = String(m[3] || '').split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n) && n > 0);
+      const hit = {
+        pid: parseInt(m[1], 10),
+        port: parseInt(m[2], 10),
+        ports,
+        csrfToken: token
+      };
+      const key = `${hit.pid}|${hit.port}|${hit.csrfToken}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hits.push(hit);
+    }
+  }
+  return hits;
+}
+
+/**
+ * REQ-4 subtask 7.1 (design §2.3/§2.5): cross-validates a transcript discovery
+ * hit against the LIVE Language Server info BEFORE the token may be used for
+ * RPC. PID is enforced when discovery knows its pid; the port-mismatch
+ * rejection criterion is ALWAYS enforced (a token whose ports do not intersect
+ * the live ports is discarded so stale-session tokens can never burn the TLS
+ * flood-guard cooldown on a doomed 401).
+ * @param {{pid?:number,port?:number,ports?:Array<number>}} discovery
+ * @param {{pid:number,port:number,ports:Array<number>,csrfToken:string}} hit
+ * @returns {boolean}
+ */
+function validateTranscriptToken(discovery, hit) {
+  if (!discovery || !hit || !isCsrfUuid(hit.csrfToken)) return false;
+  if (typeof discovery.pid === 'number' && discovery.pid > 0) {
+    if (hit.pid !== discovery.pid) return false;
+  }
+  const knownPorts = Array.isArray(discovery.ports) && discovery.ports.length > 0
+    ? discovery.ports.map(Number)
+    : (typeof discovery.port === 'number' && discovery.port > 0 ? [Number(discovery.port)] : []);
+  if (knownPorts.length === 0) return false; // nothing to validate against — discard
+  const hitPorts = [hit.port, ...(Array.isArray(hit.ports) ? hit.ports : [])]
+    .map(Number).filter(n => Number.isFinite(n) && n > 0);
+  if (hitPorts.length === 0) return false;
+  return hitPorts.some(p => knownPorts.includes(p));
+}
+
+/**
+ * Lists transcript candidate files (steps/N/output.txt and logs/transcript*.jsonl)
+ * for every conversation dir in the brain root, newest-mtime first, capped by
+ * count and per-file size (design §2.3 file-selection rules).
+ * @param {string} brainDir
+ * @param {number} [maxFiles=TRANSCRIPT_SCAN_MAX_FILES]
+ * @param {number} [maxFileSize=TRANSCRIPT_SCAN_MAX_FILE_SIZE]
+ * @returns {Array<{file:string,mtimeMs:number}>}
+ */
+function collectTranscriptCandidateFiles(brainDir, maxFiles = TRANSCRIPT_SCAN_MAX_FILES, maxFileSize = TRANSCRIPT_SCAN_MAX_FILE_SIZE) {
+  const files = [];
+  try {
+    if (!brainDir || !fs.existsSync(brainDir)) return files;
+    for (const conv of fs.readdirSync(brainDir, { withFileTypes: true })) {
+      if (!conv.isDirectory()) continue;
+      const sgDir = path.join(brainDir, conv.name, '.system_generated');
+      const pushFile = (fp) => {
+        try {
+          const st = fs.statSync(fp);
+          if (st.isFile() && st.size > 0 && st.size <= maxFileSize) {
+            files.push({ file: fp, mtimeMs: st.mtimeMs });
+          }
+        } catch (_e) { /* unreadable entry — skip quietly */ }
+      };
+      try {
+        const stepsDir = path.join(sgDir, 'steps');
+        for (const step of fs.readdirSync(stepsDir, { withFileTypes: true })) {
+          if (step.isDirectory()) pushFile(path.join(stepsDir, step.name, 'output.txt'));
+        }
+      } catch (_e) { /* no steps dir */ }
+      try {
+        const logsDir = path.join(sgDir, 'logs');
+        for (const name of fs.readdirSync(logsDir)) {
+          if (/^transcript.*\.jsonl$/i.test(name)) pushFile(path.join(logsDir, name));
+        }
+      } catch (_e) { /* no logs dir */ }
+    }
+  } catch (_err) {
+    // Missing/unreadable brain dir is a normal condition (fresh install):
+    // return what was collected — never throw to the caller.
+    files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return files.slice(0, maxFiles);
+  }
+  files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return files.slice(0, maxFiles);
+}
+
+/**
+ * REQ-4 subtask 7.1: transcript CSRF fallback (design §2.3). Scans Antigravity
+ * brain transcripts for a DISCOVERED record whose pid/port cross-validate
+ * against the live discovery result, preferring the newest file and, within a
+ * file, the LAST match (most recent discovery). Discarded tokens (pid/port
+ * mismatch, malformed UUID) are never returned. Every failure mode yields null
+ * quietly — this path must never crash a statusline-triggered refresh.
+ * @param {{pid?:number,port?:number,ports?:Array<number>}} discovery - Live LS info from discoverLanguageServer().
+ * @param {object} [opts]
+ * @param {string} [opts.brainDir] - Brain root override (test hook).
+ * @param {number} [opts.maxFiles] - Candidate-file cap (test hook).
+ * @param {number} [opts.maxFileSize] - Per-file size cap in bytes (test hook).
+ * @returns {{pid:number,port:number,ports:Array<number>,csrfToken:string,sourceFile:string,mtimeMs:number}|null}
+ */
+function scanTranscriptForCsrf(discovery, opts = {}) {
+  try {
+    if (!discovery) return null;
+    const brainDir = opts.brainDir || path.join(config.ANTIGRAVITY_DIR, 'brain');
+    const candidates = collectTranscriptCandidateFiles(
+      brainDir,
+      opts.maxFiles || TRANSCRIPT_SCAN_MAX_FILES,
+      opts.maxFileSize || TRANSCRIPT_SCAN_MAX_FILE_SIZE
+    );
+    const deadline = Date.now() + (opts.maxDurationMs || TRANSCRIPT_SCAN_MAX_DURATION_MS);
+    for (const cand of candidates) {
+      if (Date.now() > deadline) break; // bounded I/O budget exhausted
+      let content;
+      try {
+        content = fs.readFileSync(cand.file, 'utf8');
+      } catch (_e) {
+        continue; // file vanished/locked between stat and read — skip it
+      }
+      const hits = extractDiscoveryHits(content);
+      // Last match in the newest matching file wins (most recent discovery).
+      for (let i = hits.length - 1; i >= 0; i--) {
+        const hit = hits[i];
+        if (validateTranscriptToken(discovery, hit)) {
+          return { ...hit, sourceFile: cand.file, mtimeMs: cand.mtimeMs };
+        }
+        // pid/port mismatch → discard this token, keep scanning (design §2.5).
+      }
+    }
+    return null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+/**
+ * REQ-4 subtasks 7.1/7.2: CSRF token downgrade chain (design §2.1/§2.5):
+ * command_line (priority 1, existing) → transcript (priority 2, new).
+ * `heap_scan` is the reserved priority-3 slot (separate delegation §7.5).
+ * Only the token SOURCE KIND is exposed for diagnostics; the token plaintext
+ * returned here is for immediate in-memory RPC use and must never be
+ * persisted to cache/marker/log files (design §5).
+ * @param {{pid?:number,port?:number,ports?:Array<number>,csrfToken?:string,protocol?:string|null}} discovery
+ * @param {object} [opts] - Passed through to scanTranscriptForCsrf.
+ * @returns {{csrfToken:string,tokenSource:'command_line'|'transcript'|'none',pinnedPorts?:Array<number>,pinnedProtocol?:'https'}}
+ */
+function resolveCsrfTokenFallback(discovery, opts = {}) {
+  try {
+    if (!discovery) return { csrfToken: '', tokenSource: 'none' };
+    if (discovery.csrfToken) {
+      return { csrfToken: discovery.csrfToken, tokenSource: 'command_line' };
+    }
+    const hit = scanTranscriptForCsrf(discovery, opts);
+    if (hit && hit.csrfToken) {
+      const pinnedPorts = [hit.port, ...(hit.ports || [])].filter(
+        (p, i, a) => typeof p === 'number' && p > 0 && a.indexOf(p) === i
+      );
+      return {
+        csrfToken: hit.csrfToken,
+        tokenSource: 'transcript',
+        pinnedPorts,
+        // The DISCOVERED ports are the LS HTTPS API ports (TLS RPC 200
+        // evidence, debug report §2.2) — pin HTTPS and stop the blind
+        // plain-HTTP knock that produces "TLS handshake error" console floods.
+        pinnedProtocol: 'https'
+      };
+    }
+    return { csrfToken: '', tokenSource: 'none' };
+  } catch (_err) {
+    return { csrfToken: '', tokenSource: 'none' };
+  }
 }
 
 /**
@@ -990,6 +1226,8 @@ function triggerBackgroundQuotaRefresh(opts = {}) {
  * @param {number} [opts.timeoutMs] - Request timeout.
  * @param {string} [opts.cachePath] - Custom cache file path.
  * @param {function} [opts.fetcher] - Custom fetcher function for unit testing.
+ * @param {function} [opts.discover] - Custom discovery function for unit testing (same contract as discoverLanguageServer).
+ * @param {object} [opts.transcriptScan] - Override forwarded to scanTranscriptForCsrf (e.g. {brainDir} test hook).
  * @param {Date} [opts.refDate] - Reference date.
  * @returns {Promise<object>} Quota result object.
  */
@@ -1002,6 +1240,15 @@ async function fetchLiveGeminiQuota(opts = {}) {
     let csrfToken = opts.csrfToken;
     let discoveredProtocol = null;
     let candidatePorts = opts.ports || (port ? [port] : []);
+    // REQ-4 subtask 7.2 (design §3.2): which token source serves this attempt.
+    // Enum: 'command_line' | 'transcript' | 'heap_scan' (reserved, §7.5) | 'none'.
+    let tokenSource = csrfToken ? 'command_line' : 'none';
+    // REQ-4 item C: transcript DISCOVERED ports are the LS's own HTTPS API
+    // ports — when known, the probe set is PINNED to them over HTTPS only,
+    // removing the blind plain-HTTP knock that makes agy.exe log
+    // "http: TLS handshake error ... client sent an HTTP request to an HTTPS server".
+    let pinnedHttpsOnly = false;
+    let discoveredPid;
 
     // FY-2026-09-12-001: honor the negative-probe cooldown BEFORE spawning any
     // discovery work — this is what stops the TLS-handshake-error flood while
@@ -1033,12 +1280,39 @@ async function fetchLiveGeminiQuota(opts = {}) {
     // past an active cooldown — bounded, no TLS flood regression.
 
     if (!port && candidatePorts.length === 0) {
-      const discovered = await discoverLanguageServer();
+      const discoverFn = typeof opts.discover === 'function' ? opts.discover : discoverLanguageServer;
+      const discovered = await discoverFn();
       if (discovered) {
         candidatePorts = discovered.ports && discovered.ports.length > 0 ? discovered.ports : [discovered.port];
         port = port || discovered.port;
         csrfToken = csrfToken !== undefined ? csrfToken : discovered.csrfToken;
         discoveredProtocol = discovered.protocol || null;
+        discoveredPid = discovered.pid;
+        if (csrfToken) tokenSource = 'command_line';
+      }
+    }
+
+    // REQ-4 subtasks 7.1/7.2 + C: CSRF downgrade chain (design §2.5):
+    // command_line (priority 1, existing) → transcript (priority 2, new).
+    // heap_scan stays a reserved slot (separate delegation §7.5). Invoked ONLY
+    // when the command line yielded no token AND this is a discovery-driven
+    // attempt — explicit-target probes (unit tests, forced port) keep the
+    // hermetic behaviour they had before this feature. A transcript hit
+    // replaces the candidate ports with its validated port list and pins
+    // HTTPS, so a plain HTTP request is never sent against an HTTPS port.
+    if (!csrfToken && candidatePorts.length > 0 && !hasExplicitTarget) {
+      const fb = resolveCsrfTokenFallback(
+        { pid: discoveredPid, ports: candidatePorts, port: candidatePorts[0], csrfToken: '' },
+        opts.transcriptScan || {}
+      );
+      tokenSource = fb.tokenSource;
+      if (fb.csrfToken) {
+        csrfToken = fb.csrfToken;
+        if (Array.isArray(fb.pinnedPorts) && fb.pinnedPorts.length > 0) {
+          candidatePorts = fb.pinnedPorts.slice();
+          port = fb.pinnedPorts[0];
+        }
+        pinnedHttpsOnly = fb.pinnedProtocol === 'https';
       }
     }
 
@@ -1046,8 +1320,11 @@ async function fetchLiveGeminiQuota(opts = {}) {
       // No server found: persist the cooldown so the next statusline renders
       // stop hammering loopback with HTTPS-first probes (TLS flood root cause).
       // Explicit-target probes (tests/forced port) never write the marker.
+      // REQ-4 §3.2: record the REAL token-source verdict (no discovery token
+      // and no candidate ports means the fallback chain could not run) instead
+      // of the legacy default, which mislabelled this case 'command_line'.
       if (!hasExplicitTarget) {
-        writeProbeCooldown(opts.cooldownMarker);
+        writeProbeCooldown(opts.cooldownMarker, { tokenSource });
       }
       return {
         isLive: false,
@@ -1067,11 +1344,24 @@ async function fetchLiveGeminiQuota(opts = {}) {
     let protocols;
     if (opts.protocols && Array.isArray(opts.protocols) && opts.protocols.length > 0) {
       protocols = opts.protocols;
+    } else if (pinnedHttpsOnly) {
+      // REQ-4 item C: token recovered from a transcript DISCOVERED record —
+      // its ports are known HTTPS-only (TLS RPC 200 evidence, debug report
+      // §2.2). Probing them over plain HTTP is exactly what produced the
+      // "TLS handshake error" console flood. Pin HTTPS; no HTTP fallback.
+      protocols = ['https'];
     } else if (opts.protocol) {
       protocols = [opts.protocol];
     } else if (discoveredProtocol) {
-      protocols = [discoveredProtocol, discoveredProtocol === 'https' ? 'http' : 'https'];
+      // REQ-4 item C (command_line side): the command line told us the LS API
+      // URL protocol — knock ONLY that protocol. Probing the opposite protocol
+      // on a known port is the blind port×protocol loop that produced the
+      // `TLS handshake error ... HTTP request to an HTTPS server` console
+      // flood when the HTTPS probe failed with 401.
+      protocols = [discoveredProtocol];
     } else {
+      // No token and no port intelligence: total probe loop retained (the
+      // legacy 'none' path, flood-guarded by the 10m cooldown marker).
       protocols = ['https', 'http'];
     }
 
@@ -1210,7 +1500,7 @@ async function fetchLiveGeminiQuota(opts = {}) {
         writeProbeCooldown(opts.cooldownMarker, {
           reason: cooldownReason,
           detail: errorDetail,
-          tokenSource: csrfToken ? 'command_line' : 'none'
+          tokenSource
         });
       }
       // REQ-3 Fix 3: stamp attempt diagnostics into the existing cache
@@ -1229,6 +1519,7 @@ async function fetchLiveGeminiQuota(opts = {}) {
           ? `Language Server rejected the CSRF token (HTTP 401): ${errorDetail}`
           : 'No Gemini quota pool found in Language Server response',
         errorKind,
+        tokenSource,
         source: 'fallback',
         cacheFile: cachePath
       };
@@ -1237,7 +1528,9 @@ async function fetchLiveGeminiQuota(opts = {}) {
     // Success: clear any stale cooldown marker so future failures re-probe fast.
     clearProbeCooldown(opts.cooldownMarker);
 
-    const saved = saveCachedGeminiQuota(quota, cachePath);
+    // REQ-4 §3.3/§5: the cache records the token SOURCE KIND only — agy-tools
+    // never persists the token plaintext.
+    const saved = saveCachedGeminiQuota({ ...quota, tokenSource }, cachePath);
     return {
       ...saved,
       isLive: true,
@@ -1325,6 +1618,12 @@ module.exports = {
   extractPortFromNetstat,
   extractPortFromLsof,
   discoverLanguageServer,
+  isCsrfUuid,
+  extractDiscoveryHits,
+  validateTranscriptToken,
+  collectTranscriptCandidateFiles,
+  scanTranscriptForCsrf,
+  resolveCsrfTokenFallback,
   makeRpcRequest,
   callRetrieveUserQuotaSummary,
   callGetUserStatus,

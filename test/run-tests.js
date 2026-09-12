@@ -4234,16 +4234,27 @@ async function runAllTests() {
       }
     });
 
-    await test('REQ-3 Fix 1: CSRF token fallback NOT implemented — no evidence-backed alternate token source exists on this platform (see session report)', () => {
-      // Intentional documentation test: the recon sweeps (scratch/req3_csrf_recon*.py,
-      // req3_keyring_probe.ps1, req3_http_probe.js) found no file/env/handle source
-      // exposing the Language Server CSRF token. parseCommandLine + discovery remain
-      // the ONLY token path (command_line, first priority). If a future agy build
-      // persists the state JSON {pid,httpsPort,csrfToken}, extend discoverLanguageServer
-      // then — guessing a path today is prohibited.
+    await test('REQ-4 7.2: command_line remains priority-1 token source; transcript is priority-2, heap_scan reserved, none last (design §2.1)', () => {
+      // The REQ-3 documentation test ("fallback NOT implemented") is superseded by
+      // the evidence-backed transcript fallback (design doc §2.3, debug report §2.1).
+      // command_line must still win whenever discovery carries a token.
       assert(typeof geminiQuota.discoverLanguageServer === 'function');
       const parsed = geminiQuota.parseCommandLine('agy.exe --api_url https://127.0.0.1:60125 --csrf_token tok-123');
       assert.strictEqual(parsed.csrfToken, 'tok-123', 'command-line token path must remain first priority');
+
+      // resolveCsrfTokenFallback enum contract: 'command_line' | 'transcript' | 'none'
+      // (heap_scan reserved for §7.5), decided WITHOUT touching the filesystem for
+      // the command_line branch.
+      const cl = geminiQuota.resolveCsrfTokenFallback({ pid: 1, ports: [1], csrfToken: 'tok-123' }, { brainDir: 'Z:\\definitely-missing-brain' });
+      assert.strictEqual(cl.tokenSource, 'command_line');
+      assert.strictEqual(cl.csrfToken, 'tok-123');
+
+      const none = geminiQuota.resolveCsrfTokenFallback({ pid: 1, ports: [1], csrfToken: '' }, { brainDir: 'Z:\\definitely-missing-brain' });
+      assert.strictEqual(none.tokenSource, 'none');
+      assert.strictEqual(none.csrfToken, '');
+
+      const noDisc = geminiQuota.resolveCsrfTokenFallback(null);
+      assert.strictEqual(noDisc.tokenSource, 'none');
     });
 
     await test('parseCommandLine should discover token from ANTIGRAVITY_CSRF_TOKEN and CSRF_TOKEN env vars', () => {
@@ -4475,6 +4486,324 @@ async function runAllTests() {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
     });
+    // ---- REQ-4 subtask 7.1/7.2 + C: transcript CSRF fallback unit tests ----
+    {
+      const UUID_OK = '0653f3e9-312c-4dd4-b5dc-9017a78d4b05';
+      const UUID_OLD = '11111111-2222-3333-4444-555555555555';
+      const discoveredLine = (pid, port, ports, token) =>
+        `2026-09-12T21:00:00Z INFO LS bootstrap\nDISCOVERED: {"pid":${pid},"port":${port},"ports":[${ports.join(',')}],"csrfToken":"${token}","protocol":null}\nnext line`;
+
+      const mkBrain = (tmp) => {
+        const brain = path.join(tmp, 'brain');
+        const writeOutput = (conv, step, content) => {
+          const dir = path.join(brain, conv, '.system_generated', 'steps', String(step));
+          fs.mkdirSync(dir, { recursive: true });
+          const fp = path.join(dir, 'output.txt');
+          fs.writeFileSync(fp, content, 'utf8');
+          return fp;
+        };
+        const writeLog = (conv, name, content) => {
+          const dir = path.join(brain, conv, '.system_generated', 'logs');
+          fs.mkdirSync(dir, { recursive: true });
+          const fp = path.join(dir, name);
+          fs.writeFileSync(fp, content, 'utf8');
+          return fp;
+        };
+        const setMtime = (fp, ms) => {
+          const d = new Date(ms);
+          fs.utimesSync(fp, d, d);
+        };
+        return { brain, writeOutput, writeLog, setMtime };
+      };
+
+      await test('REQ-4 7.1 case1: transcript scan returns token on PID+port match (pattern A, plain output.txt)', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rq4-scan-'));
+        try {
+          const { brain, writeOutput } = mkBrain(tmp);
+          writeOutput('conv-a', 25, discoveredLine(34784, 60462, [60462, 60463], UUID_OK));
+          const hit = geminiQuota.scanTranscriptForCsrf(
+            { pid: 34784, ports: [60462, 60463] },
+            { brainDir: brain }
+          );
+          assert(hit !== null, 'matching discovery must yield a transcript hit');
+          assert.strictEqual(hit.csrfToken, UUID_OK);
+          assert.strictEqual(hit.pid, 34784);
+          assert.strictEqual(hit.port, 60462);
+          assert.deepStrictEqual(hit.ports, [60462, 60463]);
+          assert(hit.sourceFile.endsWith('output.txt'));
+          // fallback wrapper surfaces it with the transcript tokenSource + HTTPS pin
+          const fb = geminiQuota.resolveCsrfTokenFallback(
+            { pid: 34784, ports: [60462, 60463], csrfToken: '' },
+            { brainDir: brain }
+          );
+          assert.strictEqual(fb.tokenSource, 'transcript');
+          assert.deepStrictEqual(fb.pinnedPorts, [60462, 60463]);
+          assert.strictEqual(fb.pinnedProtocol, 'https');
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      await test('REQ-4 7.1 case2: token from a different PID is discarded and never returned', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rq4-pid-'));
+        try {
+          const { brain, writeOutput } = mkBrain(tmp);
+          // Stale-session record: same ports as today's LS, but a dead PID.
+          writeOutput('conv-old', 7, discoveredLine(11111, 60462, [60462, 60463], UUID_OLD));
+          const hit = geminiQuota.scanTranscriptForCsrf(
+            { pid: 34784, ports: [60462, 60463] },
+            { brainDir: brain }
+          );
+          assert.strictEqual(hit, null, 'pid-mismatch token must be discarded');
+          // direct validator contract
+          assert.strictEqual(geminiQuota.validateTranscriptToken(
+            { pid: 34784, ports: [60462] },
+            { pid: 11111, port: 60462, ports: [60462], csrfToken: UUID_OLD }
+          ), false);
+          // malformed (non-UUID) token never validates
+          assert.strictEqual(geminiQuota.isCsrfUuid('zzzzzzzz-bbbb-cccc-dddd-eeeeeeeeeeee'), false);
+          assert.strictEqual(geminiQuota.isCsrfUuid(UUID_OLD), true);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      await test('REQ-4 7.1 case3: port mismatch discards the token; pid-less discovery relaxes to port-only validation', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rq4-port-'));
+        try {
+          const { brain, writeOutput } = mkBrain(tmp);
+          writeOutput('conv-a', 1, discoveredLine(34784, 50001, [50001, 50002], UUID_OK));
+          // Same PID but ports do not intersect → discard (mandatory rejection rule).
+          assert.strictEqual(geminiQuota.scanTranscriptForCsrf(
+            { pid: 34784, ports: [60462, 60463] },
+            { brainDir: brain }
+          ), null, 'port-mismatch token must be discarded even when pid matches');
+          // Delegation-A relaxation: discovery knowing only ports (no pid) still
+          // accepts a port-intersecting hit…
+          assert(geminiQuota.scanTranscriptForCsrf(
+            { ports: [60462], port: 60462 },
+            { brainDir: brain }
+          ) === null, 'no port intersection with pid-less discovery must still discard');
+          const relaxed = geminiQuota.scanTranscriptForCsrf(
+            { ports: [50001], port: 50001 },
+            { brainDir: brain }
+          );
+          assert(relaxed !== null && relaxed.csrfToken === UUID_OK, 'port-only discovery must accept intersecting hit');
+          // …and a discovery without ANY port info validates against nothing → discard.
+          assert.strictEqual(geminiQuota.validateTranscriptToken(
+            { pid: 34784 },
+            { pid: 34784, port: 50001, ports: [50001], csrfToken: UUID_OK }
+          ), false);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      await test('REQ-4 7.1 case4: newest mtime file wins and the LAST match inside it is adopted (JSONL-escaped too)', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rq4-multi-'));
+        try {
+          const { brain, writeOutput, writeLog, setMtime } = mkBrain(tmp);
+          const now = Date.now();
+          // Older conversation file: valid but stale.
+          const oldFp = writeOutput('conv-old', 3, discoveredLine(34784, 60462, [60462, 60463], UUID_OLD));
+          setMtime(oldFp, now - 3600 * 1000);
+          // Newest file: JSONL transcript with escaped quotes, TWO matches inside.
+          const jsonl = [
+            JSON.stringify({ type: 'LOG', content: discoveredLine(34784, 60462, [60462, 60463], UUID_OLD) }),
+            JSON.stringify({ type: 'LOG', content: 'noise line' }),
+            JSON.stringify({ type: 'LOG', content: discoveredLine(34784, 60462, [60462, 60463], UUID_OK) })
+          ].join('\n');
+          const newFp = writeLog('conv-new', 'transcript_full.jsonl', jsonl);
+          setMtime(newFp, now);
+          const hit = geminiQuota.scanTranscriptForCsrf(
+            { pid: 34784, ports: [60462, 60463] },
+            { brainDir: brain }
+          );
+          assert(hit !== null);
+          assert.strictEqual(hit.csrfToken, UUID_OK, 'last match of the newest-mtime file must win');
+          assert.strictEqual(hit.sourceFile, newFp);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      await test('REQ-4 7.1 case5: empty or missing brain directory yields null without crashing', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rq4-empty-'));
+        try {
+          const { brain } = mkBrain(tmp);
+          fs.mkdirSync(brain, { recursive: true });
+          assert.strictEqual(geminiQuota.scanTranscriptForCsrf({ pid: 1, ports: [2] }, { brainDir: brain }), null);
+          assert.strictEqual(geminiQuota.scanTranscriptForCsrf({ pid: 1, ports: [2] }, { brainDir: path.join(tmp, 'nope') }), null);
+          assert.strictEqual(geminiQuota.scanTranscriptForCsrf(null), null);
+          // Garbage conversation dirs (no .system_generated) are skipped quietly.
+          fs.mkdirSync(path.join(brain, 'junk-conv'), { recursive: true });
+          assert.strictEqual(geminiQuota.scanTranscriptForCsrf({ pid: 1, ports: [2] }, { brainDir: brain }), null);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      await test('REQ-4 7.1 case6: files above the size cap are skipped (10MB default cap honored)', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rq4-size-'));
+        try {
+          const { brain, writeOutput } = mkBrain(tmp);
+          const big = writeOutput('conv-big', 1, discoveredLine(34784, 60462, [60462, 60463], UUID_OK) + '\n' + 'x'.repeat(5000));
+          const small = writeOutput('conv-small', 2, discoveredLine(34784, 60462, [60462, 60463], UUID_OLD));
+          assert(fs.statSync(big).size > fs.statSync(small).size);
+          // Cap injected via test hook: only the small file may be scanned.
+          const hit = geminiQuota.scanTranscriptForCsrf(
+            { pid: 34784, ports: [60462] },
+            { brainDir: brain, maxFileSize: fs.statSync(small).size + 1 }
+          );
+          assert(hit !== null, 'small file must still be found when the oversized one is skipped');
+          assert.strictEqual(hit.sourceFile, small);
+          assert.strictEqual(hit.csrfToken, UUID_OLD);
+          // Production default cap is 10MB per design §2.3.
+          const caps = geminiQuota.collectTranscriptCandidateFiles(brain, 300, 10 * 1024 * 1024);
+          assert.strictEqual(caps.length, 2, 'both files are under the 10MB production cap');
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      await test('REQ-4 7.2 case7: transcript success persists tokenSource only — cache/marker never store the token plaintext (design §5)', async () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rq4-src-'));
+        const markerPath = path.join(tmp, 'gemini_quota_probe_cooldown.json');
+        try {
+          const { brain, writeOutput } = mkBrain(tmp);
+          writeOutput('conv-a', 1, discoveredLine(7777, 65001, [65001, 65002], UUID_OK));
+          // writeProbeCooldown must carry tokenSource 'transcript' when passed, and
+          // a raw write of the whole cooldown payload must not contain the token.
+          geminiQuota.writeProbeCooldown(markerPath, {
+            reason: 'auth_failure',
+            detail: 'HTTP 401',
+            tokenSource: 'transcript'
+          });
+          const raw = fs.readFileSync(markerPath, 'utf8');
+          assert(raw.includes('"tokenSource":"transcript"'), `marker must record transcript kind, got: ${raw}`);
+          assert(!raw.includes(UUID_OK), 'marker must NEVER contain the token plaintext');
+          const fb = geminiQuota.resolveCsrfTokenFallback(
+            { pid: 7777, ports: [65001, 65002], csrfToken: '' },
+            { brainDir: brain }
+          );
+          assert.strictEqual(fb.tokenSource, 'transcript');
+          geminiQuota.saveCachedGeminiQuota({ remainPercent: 99, isLive: true, source: 'language_server', tokenSource: fb.tokenSource }, path.join(tmp, 'cache.json'));
+          const cacheRaw = fs.readFileSync(path.join(tmp, 'cache.json'), 'utf8');
+          assert(cacheRaw.includes('"tokenSource": "transcript"'));
+          assert(!cacheRaw.includes(UUID_OK), 'cache must NEVER contain the token plaintext');
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      await test('REQ-4 C case8: transcript-pinned probe never sends plain HTTP at an HTTPS-only LS (TLS-flood root fix)', async () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rq4-pin-'));
+        const markerPath = path.join(tmp, 'gemini_quota_probe_cooldown.json');
+        const cachePath = path.join(tmp, 'quota_cache.json');
+        const { certPem, privateKey } = createTestCert();
+        let httpsRequests = 0;
+        let httpRequests = 0;
+        const httpsServer = https.createServer({ key: privateKey, cert: certPem }, (req, res) => {
+          httpsRequests++;
+          assert.strictEqual(req.headers['x-codeium-csrf-token'], UUID_OK, 'pinned probe must carry the transcript token');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            response: { groups: [{ displayName: 'Gemini Models', buckets: [
+              { bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.996, resetTime: new Date(Date.now() + 3600e3).toISOString() },
+              { bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: 0.655, resetTime: new Date(Date.now() + 5 * 86400e3).toISOString() }
+            ] }] }
+          }));
+        });
+        const httpServer = http.createServer((req, res) => {
+          httpRequests++; // must never be reached on the pinned path
+          res.writeHead(400); res.end('plain http must not be probed');
+        });
+        await new Promise(r => httpsServer.listen(0, '127.0.0.1', r));
+        await new Promise(r => httpServer.listen(0, '127.0.0.1', r));
+        const httpsPort = httpsServer.address().port;
+        const httpPort = httpServer.address().port;
+        try {
+          const { brain, writeOutput } = mkBrain(tmp);
+          writeOutput('conv-a', 1, discoveredLine(7777, httpsPort, [httpsPort], UUID_OK));
+          const res = await geminiQuota.fetchLiveGeminiQuota({
+            discover: async () => ({ pid: 7777, port: httpsPort, ports: [httpsPort, httpPort], csrfToken: '', protocol: null }),
+            transcriptScan: { brainDir: brain },
+            cachePath,
+            cooldownMarker: markerPath
+          });
+          assert.strictEqual(res.isLive, true, `transcript fallback fetch must succeed, error: ${res.error}`);
+          assert.strictEqual(res.tokenSource, 'transcript');
+          assert.strictEqual(httpsRequests, 1, 'exactly one HTTPS RPC (RetrieveUserQuotaSummary first-try success)');
+          assert.strictEqual(httpRequests, 0, 'pinned path must NEVER knock plain HTTP on an HTTPS port');
+          assert.strictEqual(res.remainPercent, 100, '0.996 rounds to 100% (real 99%+ quota restoration)');
+          // cache records source kind only
+          const cacheRaw = fs.readFileSync(cachePath, 'utf8');
+          assert(cacheRaw.includes('"tokenSource": "transcript"'));
+          assert(!cacheRaw.includes(UUID_OK), 'cache must not contain the token plaintext');
+          // success cleared/never wrote a cooldown marker
+          assert.strictEqual(fs.existsSync(markerPath), false, 'success must not leave a cooldown marker');
+        } finally {
+          await new Promise(r => httpsServer.close(r));
+          await new Promise(r => httpServer.close(r));
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      await test('REQ-4 7.2 case9: transcript token + HTTP 401 records marker v2 with tokenSource transcript (no plaintext) and errorKind auth_failure', async () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rq4-401-'));
+        const markerPath = path.join(tmp, 'gemini_quota_probe_cooldown.json');
+        const cachePath = path.join(tmp, 'quota_cache.json');
+        fs.writeFileSync(cachePath, JSON.stringify({ version: 2, timestampMs: Date.now() - 7200e3, remainPercent: 97 }), 'utf8');
+        // Real LS answers over TLS even for auth rejections (debug report §2.2),
+        // and the transcript path pins HTTPS — mirror that with an HTTPS 401 mock.
+        const { certPem: cert401, privateKey: key401 } = createTestCert();
+        const mock401 = https.createServer({ key: key401, cert: cert401 }, (req, res) => {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ code: 'unauthenticated', message: 'missing CSRF token' }));
+        });
+        await new Promise(r => mock401.listen(0, '127.0.0.1', r));
+        const port = mock401.address().port;
+        try {
+          const { brain, writeOutput } = mkBrain(tmp);
+          // Stale record: right pid but wrong ports → must be discarded, so the
+          // attempt falls back to the legacy 'none' classification first…
+          writeOutput('conv-stale', 1, discoveredLine(7777, port + 1000, [port + 1000], UUID_OLD));
+          const resStale = await geminiQuota.fetchLiveGeminiQuota({
+            discover: async () => ({ pid: 7777, port, ports: [port], csrfToken: '', protocol: null }),
+            transcriptScan: { brainDir: brain },
+            cachePath,
+            cooldownMarker: markerPath
+          });
+          assert.strictEqual(resStale.errorKind, 'auth_failure');
+          assert.strictEqual(resStale.tokenSource, 'none', 'pid-OK/port-mismatch token must be discarded, not used');
+          let raw = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+          assert.strictEqual(raw.tokenSource, 'none');
+          assert(!raw.detail.includes(UUID_OLD), 'marker detail must never carry a discarded token');
+
+          // …while a VALID transcript token drives the 401 with transcript provenance.
+          fs.unlinkSync(markerPath);
+          writeOutput('conv-live', 2, discoveredLine(7777, port, [port], UUID_OK));
+          const res = await geminiQuota.fetchLiveGeminiQuota({
+            discover: async () => ({ pid: 7777, port, ports: [port], csrfToken: '', protocol: null }),
+            transcriptScan: { brainDir: brain },
+            cachePath,
+            cooldownMarker: markerPath
+          });
+          assert.strictEqual(res.isLive, false);
+          assert.strictEqual(res.errorKind, 'auth_failure');
+          assert.strictEqual(res.tokenSource, 'transcript', 'returned diagnostics must expose the transcript source');
+          raw = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+          assert.strictEqual(raw.version, 2);
+          assert.strictEqual(raw.reason, 'auth_failure');
+          assert.strictEqual(raw.tokenSource, 'transcript', 'marker must record the transcript source kind');
+          assert(!fs.readFileSync(markerPath, 'utf8').includes(UUID_OK), 'marker must not contain the token plaintext');
+          assert(!fs.readFileSync(cachePath, 'utf8').includes(UUID_OK), 'cache decoration must not contain the token plaintext');
+        } finally {
+          await new Promise(r => mock401.close(r));
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+    }
   });
 
   // --- Suite 25: Cross-Platform Installer Scripts Unit Tests ---
