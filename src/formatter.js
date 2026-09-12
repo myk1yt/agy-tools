@@ -621,13 +621,165 @@ function formatMiniBar(percent, length = 5) {
 }
 
 /**
- * Generates a 1-line real-time status badge string for PostInvocation hooks.
+ * Regex matching OSC 8 hyperlink escape pairs (BEL-terminated or ST-terminated).
+ * Used for visible-width computation: the URI bytes and framing contribute no
+ * terminal columns, only the label text between the pair does.
+ */
+const OSC8_PATTERN = /\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
+/**
+ * Removes OSC 8 hyperlink escape sequences from a string (SGR codes are
+ * handled separately by stripAnsi/getDisplayWidth).
+ * @param {string} str
+ * @returns {string}
+ */
+function stripOsc8(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(OSC8_PATTERN, '');
+}
+
+/**
+ * Visible display width of a badge segment: CJK-aware (getDisplayWidth),
+ * with both SGR and OSC 8 escape sequences excluded from the measurement.
+ * @param {string} str
+ * @returns {number}
+ */
+function getBadgeVisibleWidth(str) {
+  return getDisplayWidth(stripOsc8(str));
+}
+
+/**
+ * Resolves the render-time terminal width for badge wrapping.
+ * Priority: process.env.COLUMNS (test-controllable) -> process.stdout.columns
+ * -> fallback 100. Invalid/non-positive values are skipped.
+ * @returns {number}
+ */
+function resolveBadgeWidth() {
+  const envCols = parseInt(process.env.COLUMNS, 10);
+  if (Number.isFinite(envCols) && envCols > 0) return envCols;
+  const cols = process.stdout && process.stdout.columns;
+  if (Number.isFinite(cols) && cols > 0) return cols;
+  return 100;
+}
+
+/**
+ * Single-character display width using the same CJK ranges as getDisplayWidth.
+ * @param {string} ch - One UTF-16 code unit.
+ * @returns {number} 1 or 2
+ */
+function charDisplayWidth(ch) {
+  const code = ch.charCodeAt(0);
+  if (
+    (code >= 0x1100 && code <= 0x115f) ||
+    (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
+    (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0xfe10 && code <= 0xfe19) ||
+    (code >= 0xfe30 && code <= 0xfe6f) ||
+    (code >= 0xff00 && code <= 0xff60) ||
+    (code >= 0xffe0 && code <= 0xffe6)
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+/**
+ * ANSI/OSC-aware safe truncation of a badge segment to maxWidth visible
+ * columns, ending with an ellipsis. Escape sequences (SGR colors, OSC 8
+ * framing) pass through without consuming width. Used ONLY for the first
+ * badge segment when it alone exceeds the terminal width (REQ-1).
+ * @param {string} str - Segment text (may contain SGR/OSC 8 sequences).
+ * @param {number} maxWidth - Target visible width (>= 1).
+ * @returns {string} Truncated segment whose visible width <= maxWidth.
+ */
+function truncateBadgeSegment(str, maxWidth) {
+  const clean = stripOsc8(str);
+  if (getDisplayWidth(clean) <= maxWidth) return str;
+  const seqRe = /\x1b\[[0-9;]*m/g; // SGR sequences (OSC 8 stripped above)
+  let out = '';
+  let width = 0;
+  const budget = Math.max(0, maxWidth - 1); // reserve 1 column for the ellipsis
+  let i = 0;
+  while (i < clean.length) {
+    seqRe.lastIndex = i;
+    const m = seqRe.exec(clean);
+    if (m && m.index === i) {
+      out += m[0]; // styling passthrough, zero width
+      i += m[0].length;
+      continue;
+    }
+    const ch = clean[i];
+    const w = charDisplayWidth(ch);
+    if (width + w > budget) break;
+    out += ch;
+    width += w;
+    i++;
+  }
+  out += '…';
+  if (colorsEnabled) out += STYLES.reset;
+  return out;
+}
+
+/**
+ * Wraps badge segments into at most 2 physical lines at ` | ` boundaries.
+ * REQ-1: when the joined visible width exceeds `width`, split so that line 1
+ * takes as many leading segments as fit and line 2 keeps the remainder —
+ * no segment is ever dropped. If the first segment alone exceeds `width`,
+ * it is safely truncated with an ellipsis (the only allowed truncation).
+ * @param {string[]} segments - Badge segments (already styled).
+ * @param {number} width - Available terminal columns.
+ * @returns {string} 1 line (no \n) or exactly 2 lines joined by one '\n'.
+ */
+function wrapBadgeSegments(segments, width) {
+  const SEP = ' | ';
+  const sepW = SEP.length;
+  const widths = segments.map(getBadgeVisibleWidth);
+  const total = widths.reduce((a, b) => a + b, 0) + sepW * Math.max(0, segments.length - 1);
+  if (total <= width) {
+    return segments.join(SEP);
+  }
+
+  // Overflow path: exactly 2 lines.
+  // First segment alone exceeds the width -> truncate it, rest goes to line 2.
+  if (widths[0] > width) {
+    const line1 = truncateBadgeSegment(segments[0], width);
+    if (segments.length === 1) return line1; // no phantom empty second line
+    const line2 = segments.slice(1).join(SEP);
+    return `${line1}\n${line2}`;
+  }
+
+  // Greedy fill: line 1 takes as many leading segments as still fit, always
+  // leaving at least one segment for line 2. Because line 1's prefix width is
+  // monotonic in the boundary index, the greedy split also minimizes line 2
+  // (moving the boundary left only widens line 2), so no rebalancing pass is
+  // needed: if the greedy remainder still exceeds `width`, no 2-line split
+  // with both lines within budget exists (total content > 2 lines of width)
+  // and dropping segments is prohibited by REQ-1.
+  let line1End = 0;
+  let cur = widths[0];
+  while (line1End < segments.length - 1 && cur + sepW + widths[line1End + 1] <= width) {
+    line1End++;
+    cur += sepW + widths[line1End];
+  }
+
+  const line1 = segments.slice(0, line1End + 1).join(SEP);
+  const line2 = segments.slice(line1End + 1).join(SEP);
+  return `${line1}\n${line2}`;
+}
+
+/**
+ * Generates a real-time status badge string for PostInvocation hooks.
+ * Normally a single line; when the badge's visible width exceeds the
+ * terminal width (COLUMNS || stdout.columns || 100) it is intentionally
+ * wrapped into exactly 2 physical lines at ` | ` segment boundaries so the
+ * host renderer never auto-wraps a single oversized line (REQ-1).
  * @param {object} badgeData - Turn & daily metrics.
  * @param {string} [currencyCode='usd'] - Currency code.
  * @param {boolean} [isFree=false] - Free subscription quota mode flag.
  * @param {string|null} [link=null] - Optional OSC 8 link segment appended as
  *   the last badge segment (e.g. clickable 📊 Dashboard). Null/empty omits it.
- * @returns {string}
+ * @returns {string} 1 or 2 physical lines (at most one '\n', no trailing one).
  */
 function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, link = null) {
   const turnTok = formatCompact(badgeData.turnTokens || 0);
@@ -640,30 +792,27 @@ function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, li
     : formatCurrency(badgeData.todayCostUsd || 0, currencyCode);
   const cacheHit = `${(badgeData.cacheHitRate || 0).toFixed(0)}%`;
 
-  let badge =
+  const segments = [
     `${styleText('⚡ [Antigravity]', 'brightCyan')} ` +
-    `${t('hookBadgeTurn')}: ${styleText(turnTok, 'white')} (${styleText(turnCost, 'green')}) | ` +
-    `${t('hookBadgeToday')}: ${styleText(todayTok, 'brightYellow')} (${styleText(todayCost, 'brightGreen')}) | ` +
-    `${t('hookBadgeCache')}: ${styleText(cacheHit, 'cyan')}`;
+    `${t('hookBadgeTurn')}: ${styleText(turnTok, 'white')} (${styleText(turnCost, 'green')})`,
+    `${t('hookBadgeToday')}: ${styleText(todayTok, 'brightYellow')} (${styleText(todayCost, 'brightGreen')})`,
+    `${t('hookBadgeCache')}: ${styleText(cacheHit, 'cyan')}`
+  ];
 
   if (badgeData.geminiQuota && badgeData.geminiQuota.remainPercent !== null && badgeData.geminiQuota.remainPercent !== undefined) {
     const gq = badgeData.geminiQuota;
     if (gq.quota5h || gq.quota7d) {
-      const parts = [];
       if (gq.quota5h && gq.quota5h.remainPercent !== null && gq.quota5h.remainPercent !== undefined) {
         const pct5 = Math.max(0, Math.min(100, Math.round(Number(gq.quota5h.remainPercent) || 0)));
         const bar5 = formatMiniBar(pct5, 5);
         const resetPart5 = gq.quota5h.resetFormatted ? ` (${gq.quota5h.resetFormatted})` : '';
-        parts.push(`5h: ${styleText(bar5, 'brightCyan')} ${pct5}%${resetPart5}`);
+        segments.push(`5h: ${styleText(bar5, 'brightCyan')} ${pct5}%${resetPart5}`);
       }
       if (gq.quota7d && gq.quota7d.remainPercent !== null && gq.quota7d.remainPercent !== undefined) {
         const pct7 = Math.max(0, Math.min(100, Math.round(Number(gq.quota7d.remainPercent) || 0)));
         const bar7 = formatMiniBar(pct7, 5);
         const resetPart7 = gq.quota7d.resetFormatted ? ` (${gq.quota7d.resetFormatted})` : '';
-        parts.push(`7d: ${styleText(bar7, 'brightCyan')} ${pct7}%${resetPart7}`);
-      }
-      if (parts.length > 0) {
-        badge += ` | ${parts.join(' | ')}`;
+        segments.push(`7d: ${styleText(bar7, 'brightCyan')} ${pct7}%${resetPart7}`);
       }
     } else {
       const gPct = Math.max(0, Math.min(100, Math.round(Number(gq.remainPercent) || 0)));
@@ -671,7 +820,7 @@ function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, li
       const resetWord = t('quotaReset') || '리셋';
       const resetPart = gq.resetFormatted ? ` (${resetWord} ${gq.resetFormatted})` : '';
       const gqSegment = `${t('quota5h') || '5h'}: ${styleText(bar, 'brightCyan')} ${gPct}%${resetPart}`;
-      badge += ` | ${gqSegment}`;
+      segments.push(gqSegment);
     }
   } else if (badgeData.rollingUsage) {
     const ru = badgeData.rollingUsage;
@@ -681,14 +830,14 @@ function renderRealTimeBadge(badgeData, currencyCode = 'usd', isFree = false, li
     const bar7 = formatMiniBar(r7d, 5);
     const q5h = `${t('quota5h') || '5h'}: ${styleText(bar5, 'cyan')} ${Math.round(r5h)}%`;
     const q7d = `${t('quota7d') || '7d'}: ${styleText(bar7, 'cyan')} ${Math.round(r7d)}%`;
-    badge += ` | ${q5h} | ${q7d}`;
+    segments.push(q5h, q7d);
   }
 
   if (link) {
-    badge += ` | ${link}`;
+    segments.push(link);
   }
 
-  return badge;
+  return wrapBadgeSegments(segments, resolveBadgeWidth());
 }
 
 /**
@@ -773,5 +922,10 @@ module.exports = {
   renderDailyTable,
   renderSessionTable,
   renderRealTimeBadge,
-  renderHelp
+  renderHelp,
+  stripOsc8,
+  getBadgeVisibleWidth,
+  resolveBadgeWidth,
+  truncateBadgeSegment,
+  wrapBadgeSegments
 };

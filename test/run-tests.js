@@ -2436,12 +2436,110 @@ async function runAllTests() {
 
     await test('renderRealTimeBadge should append link segment and stay single-line', () => {
       const badgeData = { turnTokens: 100, turnCostUsd: 0.001, todayTokens: 1000, todayCostUsd: 0.01, cacheHitRate: 99 };
-      const base = formatter.renderRealTimeBadge(badgeData, 'usd', false);
-      assert(!base.includes('Dashboard'));
+      const prevCols = process.env.COLUMNS;
+      process.env.COLUMNS = '200';
+      try {
+        const base = formatter.renderRealTimeBadge(badgeData, 'usd', false);
+        assert(!base.includes('Dashboard'));
 
-      const linked = formatter.renderRealTimeBadge(badgeData, 'usd', false, '📊 Dashboard');
-      assert(linked.includes('📊 Dashboard'));
-      assert(!linked.includes('\n'));
+        const linked = formatter.renderRealTimeBadge(badgeData, 'usd', false, '📊 Dashboard');
+        assert(linked.includes('📊 Dashboard'));
+        assert(!linked.includes('\n'));
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+      }
+    });
+
+    // REQ-1: intentional 2-line wrap when badge visible width exceeds terminal width.
+    // Fixture: badge data wide enough to overflow 80 columns but fit in 2 lines.
+    const req1WideBadgeData = () => ({
+      turnTokens: 2100,
+      turnCostUsd: 0.05,
+      todayTokens: 850000,
+      todayCostUsd: 21.5,
+      cacheHitRate: 75.4,
+      rollingUsage: { remain5hPercent: 80, remain7dPercent: 50 }
+    });
+    // A realistic OSC 8 link segment: its URI bytes must NOT count toward width.
+    const req1Osc8Link = '\x1b]8;;file:///C:/Users/test/dashboard.html\x07📊 Dashboard\x1b]8;;\x07';
+
+    await test('REQ-1a: badge wider than COLUMNS=80 wraps into exactly 2 physical lines, each <= 80 visible cols', () => {
+      const prevCols = process.env.COLUMNS;
+      process.env.COLUMNS = '80';
+      try {
+        const badge = formatter.renderRealTimeBadge(req1WideBadgeData(), 'usd', false, req1Osc8Link);
+        const lines = badge.split('\n');
+        assert.strictEqual(lines.length, 2, `Expected 2 physical lines, got ${lines.length}`);
+        assert(!badge.endsWith('\n'), 'Badge string must not carry a trailing newline (caller adds exactly one)');
+        assert((badge.match(/\n/g) || []).length === 1, 'At most one \\n separator');
+        for (const line of lines) {
+          const w = formatter.getBadgeVisibleWidth(line);
+          assert(w <= 80, `Line visible width ${w} must be <= 80: ${JSON.stringify(line)}`);
+        }
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+      }
+    });
+
+    await test('REQ-1b: badge stays single-line at COLUMNS=200', () => {
+      const prevCols = process.env.COLUMNS;
+      process.env.COLUMNS = '200';
+      try {
+        const badge = formatter.renderRealTimeBadge(req1WideBadgeData(), 'usd', false, req1Osc8Link);
+        assert(!badge.includes('\n'), `Badge must be single-line at width 200, got ${badge.split('\n').length} lines`);
+        assert(formatter.getBadgeVisibleWidth(badge) <= 200, 'Single line must fit in 200 visible cols');
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+      }
+    });
+
+    await test('REQ-1c: 2-line wrap preserves every segment (no drops), OSC 8 link intact', () => {
+      const prevCols = process.env.COLUMNS;
+      process.env.COLUMNS = '80';
+      try {
+        const badge = formatter.renderRealTimeBadge(req1WideBadgeData(), 'usd', false, req1Osc8Link);
+        const plain = formatter.stripOsc8(badge);
+        const i18nTurn = i18n.t('hookBadgeTurn');
+        const i18nToday = i18n.t('hookBadgeToday');
+        const i18nCache = i18n.t('hookBadgeCache');
+        const q5h = i18n.t('quota5h') || '5h';
+        const q7d = i18n.t('quota7d') || '7d';
+        for (const needle of [
+          '[Antigravity]', `${i18nTurn}:`, `${i18nToday}:`, `${i18nCache}:`,
+          `${q5h}:`, `${q7d}:`, '2.1k', '850.0k', '75%', '80%', '50%', '📊 Dashboard'
+        ]) {
+          assert(plain.includes(needle), `Wrapped badge lost segment content '${needle}': ${JSON.stringify(plain)}`);
+        }
+        // OSC 8 framing itself must survive the wrap untouched.
+        assert(badge.includes('\x1b]8;;file:///C:/Users/test/dashboard.html\x07'), 'OSC 8 open sequence must be intact');
+        assert(badge.includes('\x1b]8;;\x07'), 'OSC 8 close sequence must be intact');
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+      }
+    });
+
+    await test('REQ-1d: first segment alone exceeding width is truncated with ellipsis, visible width respected', () => {
+      const prevCols = process.env.COLUMNS;
+      process.env.COLUMNS = '20';
+      try {
+        const badge = formatter.renderRealTimeBadge(req1WideBadgeData(), 'usd', false, req1Osc8Link);
+        const lines = badge.split('\n');
+        assert.strictEqual(lines.length, 2, 'Still exactly 2 lines when first segment is truncated');
+        assert(formatter.getBadgeVisibleWidth(lines[0]) <= 20, 'Line 1 (truncated first segment) must fit in 20 cols');
+        assert(lines[0].includes('…'), `Truncated line 1 must end with ellipsis, got: ${JSON.stringify(formatter.stripOsc8(lines[0]))}`);
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+      }
+    });
+
+    await test('REQ-1e: getBadgeVisibleWidth excludes OSC 8 and SGR sequences from the measurement', () => {
+      // 8 visible chars ("Dashboard") + CJK-adjacent label, zero width for escapes
+      const linked = '\x1b[96m\x1b]8;;http://127.0.0.1:8787/\x07📊 Dashboard\x1b]8;;\x07\x1b[0m';
+      const w = formatter.getBadgeVisibleWidth(linked);
+      // '📊' counts per getDisplayWidth surrogate handling (2 code units => 2), space 1, 'Dashboard' 9
+      assert(w > 0 && w <= 13, `OSC 8/SGR must not inflate width, got ${w}`);
+      assert.strictEqual(formatter.getBadgeVisibleWidth('Dashboard'), 9);
+      assert.strictEqual(formatter.getBadgeVisibleWidth('안녕'), 4, 'CJK width still 2 per char');
     });
 
     await test('renderHelp should include dashboard flags', () => {
