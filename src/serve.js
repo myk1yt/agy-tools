@@ -26,6 +26,7 @@ const staleness = require('./serve-staleness');
 
 const SSE_INTERVAL_MS = 5000;
 const STALENESS_WATCHDOG_MS = 30000; // REQ-101/105: <=60s; 30s chosen for responsive self-termination
+const IDLE_TIMEOUT_DEFAULT_MS = 30 * 60 * 1000; // 30 minutes default idle auto-shutdown
 const PORT_RETRY_MAX = 10;
 
 /**
@@ -39,6 +40,7 @@ const PORT_RETRY_MAX = 10;
  * @param {string} [opts.modelName] - Model name used for pricing lookups.
  * @param {number} [opts.refreshSec] - HTML polling interval (embedded template).
  * @param {number} [opts.intervalMs=5000] - SSE push interval (test hook).
+ * @param {number} [opts.idleTimeoutMs=1800000] - Inactivity self-termination timeout in ms (test hook).
  * @param {string} [opts.cacheFile] - Cache file path override (test hook).
  * @param {string} [opts.srcDir] - Source directory path override (test hook).
  * @param {Function} [opts.onSelfTerminate] - Callback on self-termination (test hook).
@@ -47,6 +49,9 @@ const PORT_RETRY_MAX = 10;
 function startDashboardServer(opts = {}) {
   const preferredPort = Number.isInteger(opts.port) ? opts.port : DASHBOARD_DEFAULT_PORT;
   const intervalMs = Number(opts.intervalMs) > 0 ? Number(opts.intervalMs) : SSE_INTERVAL_MS;
+  const idleTimeoutMs = Number.isInteger(opts.idleTimeoutMs) && opts.idleTimeoutMs >= 0
+    ? opts.idleTimeoutMs
+    : IDLE_TIMEOUT_DEFAULT_MS;
   const targetCacheFile = typeof opts.cacheFile === 'string' ? opts.cacheFile : CACHE_FILE;
   const targetSrcDir = typeof opts.srcDir === 'string' ? opts.srcDir : __dirname;
   const onSelfTerminate = typeof opts.onSelfTerminate === 'function' ? opts.onSelfTerminate : null;
@@ -127,8 +132,11 @@ function startDashboardServer(opts = {}) {
   function tryListen(port, attempt) {
     return new Promise((resolve, reject) => {
       let boundPortRef = null;
+      let activeSseClients = 0;
+      let lastActivityAt = Date.now();
 
-      const server = http.createServer((req, res) => {
+      const server = http.createServer(async (req, res) => {
+        lastActivityAt = Date.now();
         // CORS for file:// pages (origin null) — E10; localhost-only server (C6)
         res.setHeader('Access-Control-Allow-Origin', '*');
 
@@ -136,6 +144,19 @@ function startDashboardServer(opts = {}) {
 
         if (urlPath === '/' || urlPath === '/index.html') {
           try {
+            if (!fs.existsSync(DASHBOARD_HTML_FILE)) {
+              try {
+                const payload = await aggregate();
+                const { writeDashboardFiles } = require('./html-report');
+                writeDashboardFiles(payload, {
+                  force: true,
+                  refreshSec: opts.refreshSec,
+                  servePort: boundPortRef || port
+                });
+              } catch (_genErr) {
+                // Fallback gracefully
+              }
+            }
             const html = fs.readFileSync(DASHBOARD_HTML_FILE, 'utf8');
             res.writeHead(200, {
               'Content-Type': 'text/html; charset=utf-8',
@@ -150,6 +171,8 @@ function startDashboardServer(opts = {}) {
         }
 
         if (urlPath === '/events') {
+          activeSseClients++;
+          lastActivityAt = Date.now();
           res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-store',
@@ -187,6 +210,8 @@ function startDashboardServer(opts = {}) {
           req.on('close', () => {
             closed = true;
             clearInterval(timer);
+            activeSseClients = Math.max(0, activeSseClients - 1);
+            lastActivityAt = Date.now();
           });
           return;
         }
@@ -238,7 +263,11 @@ function startDashboardServer(opts = {}) {
         const boundPort = server.address().port;
         boundPortRef = boundPort;
 
-        // REQ-101/105: independent watchdog — catches clientless stale servers.
+        const watchdogInterval = (idleTimeoutMs > 0 && idleTimeoutMs < STALENESS_WATCHDOG_MS)
+          ? idleTimeoutMs
+          : STALENESS_WATCHDOG_MS;
+
+        // REQ-101/105: independent watchdog — catches clientless stale servers and idle timeouts.
         const watchdog = setInterval(() => {
           if (terminated) {
             clearInterval(watchdog);
@@ -249,8 +278,14 @@ function startDashboardServer(opts = {}) {
             clearInterval(watchdog);
             selfTerminate(server, boundPort,
               `self-terminating: source file changed on disk (${hit.file}) — restart for updated code`);
+            return;
           }
-        }, STALENESS_WATCHDOG_MS);
+          if (idleTimeoutMs > 0 && activeSseClients === 0 && (Date.now() - lastActivityAt) >= idleTimeoutMs) {
+            clearInterval(watchdog);
+            selfTerminate(server, boundPort,
+              `self-terminating: idle timeout (${Math.round(idleTimeoutMs / 60000)}m with no active connections) — auto-shutdown`);
+          }
+        }, watchdogInterval);
         if (typeof watchdog.unref === 'function') watchdog.unref(); // never keep process alive
         server.once('close', () => clearInterval(watchdog));
 
@@ -287,6 +322,7 @@ function stopDashboardServer(server) {
 module.exports = {
   SSE_INTERVAL_MS,
   STALENESS_WATCHDOG_MS,
+  IDLE_TIMEOUT_DEFAULT_MS,
   PORT_RETRY_MAX,
   startDashboardServer,
   stopDashboardServer

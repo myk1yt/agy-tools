@@ -183,7 +183,11 @@ function parseArgs(argv) {
     !options.help &&
     !options.version
   ) {
-    options.today = true;
+    if (options.open) {
+      options.serve = true;
+    } else {
+      options.today = true;
+    }
   }
 
   return options;
@@ -351,6 +355,35 @@ async function runCli(argv = process.argv) {
     const activeModel = options.model || config.getActiveModelFromSettings();
     const currency = (options.currency || userConfig.currency || 'usd').toLowerCase();
     const port = Number.isInteger(options.servePort) ? options.servePort : config.DASHBOARD_DEFAULT_PORT;
+
+    // Ensure dashboard files exist before server starts so opening / never 404s
+    if (!fs.existsSync(config.DASHBOARD_HTML_FILE)) {
+      try {
+        const syncResult = await cacheManager.syncSessions({
+          forceFresh: false,
+          modelName: activeModel
+        });
+        const payload = htmlReport.buildDashboardPayload(syncResult.sessions, {
+          currency,
+          lang: targetLang || i18n.getLocale(),
+          isFree,
+          model: activeModel,
+          modelName: activeModel,
+          parsedCount: syncResult.parsedCount,
+          cachedCount: syncResult.cachedCount,
+          elapsedMs: syncResult.elapsedMs,
+          quota: userConfig.quota
+        });
+        htmlReport.writeDashboardFiles(payload, {
+          force: true,
+          refreshSec: options.refreshSec,
+          servePort: port
+        });
+      } catch (_e) {
+        // Fallback silently if sync encounters an error
+      }
+    }
+
     const serverInfo = await serve.startDashboardServer({
       port,
       currency,
@@ -411,6 +444,10 @@ async function runCli(argv = process.argv) {
         if (linkTarget.mode === 'http') {
           const ensured = await dashboardLinkModule.ensureServerRunning();
           linkUrl = ensured ? ensured.url : osc8.dashboardFileUrl();
+        } else if (options.writeDashboard) {
+          // In file mode with writeDashboard, ensure background server is running
+          // so dashboard.html SSE auto-upgrade succeeds without silent connection failures
+          dashboardLinkModule.ensureServerRunning().catch(() => {});
         }
         dashboardLink = osc8.formatOsc8Link(linkUrl, `📊 ${i18n.t('dashboardLink')}`);
       }

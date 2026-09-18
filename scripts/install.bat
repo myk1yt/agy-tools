@@ -53,6 +53,7 @@ if %ERRORLEVEL% equ 0 (
     echo node "%ROOT_DIR%\bin\agy-tokens.js" %%* >> "!USER_BIN!\agy-tokens.bat"
 
     echo @echo off > "!USER_BIN!\agy-dashboard.bat"
+    echo set "AGY_CLI_COMMAND=agy-dashboard" >> "!USER_BIN!\agy-dashboard.bat"
     echo node "%ROOT_DIR%\bin\agy-tokens.js" %%* >> "!USER_BIN!\agy-dashboard.bat"
 
     echo [SUCCESS] Created launchers in !USER_BIN!

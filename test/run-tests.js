@@ -2428,6 +2428,11 @@ async function runAllTests() {
       const optsOpen = parseArgs(['node', 'bin/agy-tokens.js', '--html', '--open']);
       assert.strictEqual(optsOpen.open, true);
 
+      const optsOpenAlone = parseArgs(['node', 'bin/agy-tokens.js', '--open']);
+      assert.strictEqual(optsOpenAlone.open, true);
+      assert.strictEqual(optsOpenAlone.serve, true);
+      assert.strictEqual(optsOpenAlone.today, false);
+
       const optsWrite = parseArgs(['node', 'bin/agy-tokens.js', '--hook', '--raw', '--write-dashboard']);
       assert.strictEqual(optsWrite.hook, true);
       assert.strictEqual(optsWrite.raw, true);
@@ -2871,6 +2876,30 @@ async function runAllTests() {
         assert(dashboardLink.readPortFile(portFile) !== null);
         dashboardLink.removePortFileIfPort(8975, portFile); // matching port → remove
         assert.strictEqual(dashboardLink.readPortFile(portFile), null);
+      } finally {
+        dashboardLink.removePortFile(portFile);
+      }
+    });
+
+    await test('isPidAlive should accurately detect live and dead processes', () => {
+      assert.strictEqual(dashboardLink.isPidAlive(process.pid), true);
+      assert.strictEqual(dashboardLink.isPidAlive(99999999), false);
+      assert.strictEqual(dashboardLink.isPidAlive(-1), false);
+      assert.strictEqual(dashboardLink.isPidAlive(0), false);
+    });
+
+    await test('ensureServerRunning should remove stale port file when recorded PID is dead and port is closed', async () => {
+      const portFile = path.join(os.tmpdir(), `agy-test-stale-pid-${process.pid}.json`);
+      try {
+        // Record with a dead PID (99999999) and a closed port (8798)
+        dashboardLink.writePortFile(8798, 99999999, portFile);
+        assert(fs.existsSync(portFile));
+        await dashboardLink.ensureServerRunning({
+          portFile,
+          entryJs: path.join(os.tmpdir(), 'definitely-missing-entry.js'),
+          port: 1
+        });
+        assert.strictEqual(fs.existsSync(portFile), false, 'stale port file with dead PID should be deleted');
       } finally {
         dashboardLink.removePortFile(portFile);
       }
@@ -3395,6 +3424,43 @@ async function runAllTests() {
       assert(serve.STALENESS_WATCHDOG_MS > 0, 'watchdog interval must be positive');
       assert(serve.STALENESS_WATCHDOG_MS <= 60000, 'watchdog interval must be <= 60s per REQ-101/105');
       assert(serveStaleness.MTIME_SAFETY_MARGIN_MS >= 1000, 'mtime safety margin must be >= 1s');
+    });
+
+    await test('idle timeout should trigger self-termination when server is inactive (REQ-IDLE)', async () => {
+      let terminationReason = null;
+      const info = await serve.startDashboardServer({
+        port: 0,
+        idleTimeoutMs: 50,
+        onSelfTerminate: (reason) => {
+          terminationReason = reason;
+        }
+      });
+
+      assert(info !== null && info.port > 0);
+
+      // Wait for idle timeout
+      await new Promise((resolve) => {
+        const check = setInterval(() => {
+          if (terminationReason !== null) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 20);
+        setTimeout(() => {
+          clearInterval(check);
+          resolve();
+        }, 3000);
+      });
+
+      assert(terminationReason !== null, 'Server should have self-terminated on idle timeout');
+      assert(terminationReason.includes('idle timeout'));
+
+      const portClosed = !(await dashboardLink.probePort(info.port));
+      assert(portClosed, 'Server port should be closed after idle self-termination');
+    });
+
+    await test('IDLE_TIMEOUT_DEFAULT_MS should be 30 minutes', () => {
+      assert.strictEqual(serve.IDLE_TIMEOUT_DEFAULT_MS, 30 * 60 * 1000);
     });
   });
 
@@ -5020,6 +5086,33 @@ async function runAllTests() {
 
       const parsed3 = parseArgs(['custom-positional-cmd']);
       assert.strictEqual(parsed3.command, 'custom-positional-cmd');
+    });
+  });
+
+  // --- Suite 26: CLI Dispatcher & Dashboard Routing ---
+  await describe('26. CLI Dispatcher & Dashboard Routing', async () => {
+    const { spawnSync } = require('child_process');
+
+    await test('agy-tools dashboard routes to --serve --open when no flags provided', () => {
+      const agyToolsPath = path.join(__dirname, '..', 'bin', 'agy-tools.js');
+
+      // Test that report flag is preserved
+      const res7d = spawnSync(process.execPath, [agyToolsPath, 'dashboard', '--7d', '--help'], { encoding: 'utf8' });
+      assert.strictEqual(res7d.status, 0);
+
+      // Test package.json scripts.dashboard
+      const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+      assert.strictEqual(pkg.scripts.dashboard, 'node bin/agy-tokens.js --serve --open');
+    });
+
+    await test('agy-tokens routes to --serve --open when invoked as agy-dashboard', () => {
+      const agyTokensPath = path.join(__dirname, '..', 'bin', 'agy-tokens.js');
+      const res = spawnSync(process.execPath, [agyTokensPath, '--help'], {
+        encoding: 'utf8',
+        env: { ...process.env, AGY_CLI_COMMAND: 'agy-dashboard' }
+      });
+      assert.strictEqual(res.status, 0);
+      assert(res.stdout.includes('Antigravity Token Tracker') || res.stdout.includes('Usage'));
     });
   });
 

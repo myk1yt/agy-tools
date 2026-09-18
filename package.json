@@ -11,7 +11,7 @@
   },
   "scripts": {
     "start": "node bin/agy-tools.js",
-    "dashboard": "node bin/agy-tokens.js",
+    "dashboard": "node bin/agy-tokens.js --serve --open",
     "test": "node test/run-tests.js"
   },
   "keywords": [

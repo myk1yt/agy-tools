@@ -84,8 +84,45 @@ async function main() {
     return;
   }
 
-  if (firstArg === 'dashboard' || firstArg === 'tokens' || firstArg === 'usage') {
-    // Strip the subcommand and route remaining arguments to the dashboard runner
+  if (firstArg === 'dashboard') {
+    const reportFlags = new Set([
+      '-t', '--today',
+      '-y', '--yesterday',
+      '--7d', '--week',
+      '--30d', '--month',
+      '--range',
+      '-s', '--session',
+      '-a', '--all',
+      '--prices', '--models',
+      '--sync', 'sync', 'sync-prices', '--sync-prices',
+      '--sync-quota', 'quota', 'sync-quota', '--quota',
+      '--hook', '--badge',
+      '-h', '--help',
+      '-v', '--version'
+    ]);
+    const subArgs = args.slice(1);
+    const hasReportFlag = subArgs.some(arg => reportFlags.has(arg.split('=')[0]));
+
+    if (hasReportFlag) {
+      const forwardedArgv = [process.argv[0], process.argv[1], ...subArgs];
+      await runCli(forwardedArgv);
+      return;
+    }
+
+    // Default for `dashboard`: launch the web dashboard
+    const hasServe = subArgs.some(a => a === '--serve' || a.startsWith('--serve=') || a === '--html' || a === '--dashboard');
+    const hasOpen = subArgs.includes('--open');
+    const extra = [];
+    if (!hasServe) extra.push('--serve');
+    if (!hasOpen) extra.push('--open');
+
+    const forwardedArgv = [process.argv[0], process.argv[1], ...extra, ...subArgs];
+    await runCli(forwardedArgv);
+    return;
+  }
+
+  if (firstArg === 'tokens' || firstArg === 'usage') {
+    // Strip the subcommand and route remaining arguments to the token tracker CLI
     const forwardedArgv = [process.argv[0], process.argv[1], ...args.slice(1)];
     await runCli(forwardedArgv);
     return;

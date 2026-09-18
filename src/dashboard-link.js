@@ -280,6 +280,22 @@ function getOwnEntryJs() {
 }
 
 /**
+ * Tests whether a process ID is currently alive.
+ * Uses process.kill(pid, 0) which is POSIX and Windows safe.
+ * @param {number} pid
+ * @returns {boolean}
+ */
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+/**
  * Ensures the local dashboard server is reachable, starting it in the
  * background when needed (see module header for the full flow).
  * Never throws; returns null when the http link cannot be guaranteed and
@@ -298,6 +314,15 @@ async function ensureServerRunning(opts = {}) {
 
   const record = readPortFile(portFile);
   const recordedPort = record && Number.isInteger(record.port) ? record.port : null;
+  const recordedPid = record && Number.isInteger(record.pid) ? record.pid : null;
+
+  // Clean stale port file if recorded process is dead and port probe fails
+  if (recordedPort !== null && recordedPid !== null && !isPidAlive(recordedPid)) {
+    const isPortOpen = await probePort(recordedPort);
+    if (!isPortOpen) {
+      removePortFile(portFile);
+    }
+  }
 
   // REQ-240: a recorded server whose payloadVersion is older than the current
   // DASHBOARD_PAYLOAD_VERSION is stale (running pre-upgrade code that pushes
@@ -369,5 +394,6 @@ module.exports = {
   removePortFile,
   removePortFileIfPort,
   probePort,
+  isPidAlive,
   ensureServerRunning
 };
