@@ -4906,6 +4906,82 @@ async function runAllTests() {
           fs.rmSync(tmp, { recursive: true, force: true });
         }
       });
+
+      await test('Multi-candidate process discovery recovers live quota across multiple ports and renders clean badge without ! marker', async () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'multi-cand-'));
+        const cachePath = path.join(tmp, 'gemini_quota_cache.json');
+        const markerPath = path.join(tmp, 'gemini_quota_probe_cooldown.json');
+
+        const server401 = http.createServer((req, res) => {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ code: 'unauthenticated', message: 'invalid CSRF token' }));
+        });
+        const server200 = http.createServer((req, res) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            response: {
+              groups: [
+                {
+                  displayName: 'Gemini Models',
+                  buckets: [
+                    {
+                      bucketId: 'gemini-5h',
+                      window: '5h',
+                      remainingFraction: 0.55,
+                      resetTime: new Date(Date.now() + 3600000).toISOString()
+                    }
+                  ]
+                }
+              ]
+            }
+          }));
+        });
+
+        await new Promise(r => server401.listen(0, '127.0.0.1', r));
+        await new Promise(r => server200.listen(0, '127.0.0.1', r));
+        const port401 = server401.address().port;
+        const port200 = server200.address().port;
+
+        try {
+          fs.writeFileSync(markerPath, JSON.stringify({
+            version: 2, reason: 'auth_failure', expiryMs: Date.now() + 600000
+          }), 'utf8');
+
+          const res = await geminiQuota.fetchLiveGeminiQuota({
+            discover: async () => ({
+              pid: 9999,
+              port: port200,
+              ports: [port200, port401],
+              csrfToken: 'tok-valid',
+              protocol: 'http'
+            }),
+            cachePath,
+            cooldownMarker: markerPath,
+            forceRefresh: true
+          });
+
+          assert.strictEqual(res.isLive, true, 'Live fetch must succeed using responsive candidate port');
+          assert.strictEqual(res.remainPercent, 55);
+          assert.strictEqual(fs.existsSync(markerPath), false, 'Cooldown marker must be cleared on success');
+
+          const cached = geminiQuota.getCachedGeminiQuota(cachePath, 30000);
+          assert.strictEqual(cached.isFresh, true);
+          assert.strictEqual(cached.isStale, false);
+
+          const badge = formatter.stripAnsi(formatter.renderRealTimeBadge({
+            turnTokens: 50, turnCostUsd: 0.001, todayTokens: 500, todayCostUsd: 0.005,
+            cacheHitRate: 80, geminiQuota: cached
+          }));
+          assert(badge.includes('55%'), `Badge must show 55%, got: ${badge}`);
+          assert(!badge.includes('55%!'), `Badge must not append anomalous ! marker, got: ${badge}`);
+          assert(!badge.includes('55%*'), `Badge must not append anomalous * marker, got: ${badge}`);
+          assert(!badge.includes('55%1'), `Badge must not display 55%1, got: ${badge}`);
+        } finally {
+          await new Promise(r => server401.close(r));
+          await new Promise(r => server200.close(r));
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
     }
   });
 

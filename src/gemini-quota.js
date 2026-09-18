@@ -415,8 +415,9 @@ async function discoverLanguageServer(opts = {}) {
     }, timeoutMs);
 
     if (process.platform === 'win32') {
-      // Windows Discovery: PowerShell with EncodedCommand checking language_server, agy, or csrf_token
-      const script = `Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*language_server*' -or $_.Name -like '*agy*' -or $_.CommandLine -like '*language_server*' -or $_.CommandLine -like '*csrf*' } | Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress`;
+      // Windows Discovery: PowerShell with EncodedCommand checking language_server, agy, or csrf_token,
+      // excluding shell hosts (powershell, pwsh, cmd) and sorted newest-first by CreationDate.
+      const script = `Get-CimInstance Win32_Process | Where-Object { ($_.Name -like '*language_server*' -or $_.Name -like '*agy*' -or $_.CommandLine -like '*language_server*' -or $_.CommandLine -like '*csrf*') -and $_.Name -notmatch '^(powershell|pwsh|cmd)\\.exe$' } | Sort-Object CreationDate -Descending | Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress`;
       const encoded = Buffer.from(script, 'utf16le').toString('base64');
       exec(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`, { timeout: timeoutMs, windowsHide: true }, (err, stdout) => {
         if (err || !stdout || !stdout.trim()) {
@@ -425,23 +426,42 @@ async function discoverLanguageServer(opts = {}) {
         try {
           let items = JSON.parse(stdout.trim());
           if (!Array.isArray(items)) items = [items];
+          let primary = null;
+          const allCandidatePorts = [];
+          let netstatOut = null;
+
           for (const item of items) {
             if (!item || !item.CommandLine) continue;
             const pid = item.ProcessId;
             const { csrfToken, port, protocol } = parseCommandLine(item.CommandLine);
             if (port) {
-              return finish({ pid, port, ports: [port], csrfToken: csrfToken || '', protocol: protocol || null });
+              if (!primary) {
+                primary = { pid, port, ports: [port], csrfToken: csrfToken || '', protocol: protocol || null };
+              }
+              if (!allCandidatePorts.includes(port)) allCandidatePorts.push(port);
+              continue;
             }
             // Port not in commandline, query netstat
             try {
-              const netstatOut = execSync(`netstat -ano -p tcp`, { encoding: 'utf8', timeout: 1500, windowsHide: true });
+              if (!netstatOut) {
+                netstatOut = execSync(`netstat -ano -p tcp`, { encoding: 'utf8', timeout: 1500, windowsHide: true });
+              }
               const netPorts = extractPortsFromNetstat(netstatOut, pid);
               if (netPorts.length > 0) {
-                return finish({ pid, port: netPorts[0], ports: netPorts, csrfToken: csrfToken || '', protocol: protocol || null });
+                if (!primary) {
+                  primary = { pid, port: netPorts[0], ports: netPorts, csrfToken: csrfToken || '', protocol: protocol || null };
+                }
+                for (const np of netPorts) {
+                  if (!allCandidatePorts.includes(np)) allCandidatePorts.push(np);
+                }
               }
             } catch (_ne) {
               // Ignore netstat error
             }
+          }
+          if (primary) {
+            primary.ports = allCandidatePorts.length > 0 ? allCandidatePorts : primary.ports;
+            return finish(primary);
           }
         } catch (_pe) {
           // Ignore JSON parse error
@@ -449,11 +469,14 @@ async function discoverLanguageServer(opts = {}) {
         finish(null);
       });
     } else {
-      // POSIX Discovery: ps -ax -o pid,command
+      // POSIX Discovery: ps -ax -o pid,command, evaluated newest-first (reverse order)
       exec(`ps -ax -o pid,command`, { timeout: timeoutMs, windowsHide: true }, (err, stdout) => {
         if (err || !stdout) return finish(null);
         const lines = stdout.split('\n');
-        for (const line of lines) {
+        const candidates = lines.slice().reverse();
+        let primary = null;
+        const allCandidatePorts = [];
+        for (const line of candidates) {
           if ((/language_server/i.test(line) || /agy/i.test(line) || /csrf/i.test(line)) && !/grep|ps -ax/i.test(line)) {
             const trimmed = line.trim();
             const spaceIdx = trimmed.indexOf(' ');
@@ -462,20 +485,31 @@ async function discoverLanguageServer(opts = {}) {
               const cmdLine = trimmed.substring(spaceIdx + 1);
               const { csrfToken, port, protocol } = parseCommandLine(cmdLine);
               if (port) {
-                return finish({ pid, port, ports: [port], csrfToken: csrfToken || '', protocol: protocol || null });
+                if (!primary) {
+                  primary = { pid, port, ports: [port], csrfToken: csrfToken || '', protocol: protocol || null };
+                }
+                if (!allCandidatePorts.includes(port)) allCandidatePorts.push(port);
+                continue;
               }
               // Port not in commandline, query lsof
               try {
                 const lsofOut = execSync(`lsof -a -p ${pid} -iTCP -sTCP:LISTEN -P -n`, { encoding: 'utf8', timeout: 1000, windowsHide: true });
                 const lsofPort = extractPortFromLsof(lsofOut);
                 if (lsofPort) {
-                  return finish({ pid, port: lsofPort, ports: [lsofPort], csrfToken: csrfToken || '', protocol: protocol || null });
+                  if (!primary) {
+                    primary = { pid, port: lsofPort, ports: [lsofPort], csrfToken: csrfToken || '', protocol: protocol || null };
+                  }
+                  if (!allCandidatePorts.includes(lsofPort)) allCandidatePorts.push(lsofPort);
                 }
               } catch (_le) {
                 // Ignore lsof error
               }
             }
           }
+        }
+        if (primary) {
+          primary.ports = allCandidatePorts.length > 0 ? allCandidatePorts : primary.ports;
+          return finish(primary);
         }
         finish(null);
       });

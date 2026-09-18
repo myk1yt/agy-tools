@@ -282,7 +282,7 @@ async function runCli(argv = process.argv) {
 
   // 1b. Sync Gemini Quota Subcommand
   if (options.syncQuota) {
-    const quotaRes = await geminiQuota.fetchLiveGeminiQuota();
+    const quotaRes = await geminiQuota.fetchLiveGeminiQuota({ forceRefresh: true });
     if (options.json) {
       console.log(JSON.stringify(quotaRes, null, 2));
       return;
