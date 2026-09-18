@@ -17,7 +17,9 @@ const isHookMode = process.argv.includes('--hook') || process.argv.includes('--b
 
 // Check if invoked specifically as agy-dashboard
 const invokedBase = path.basename(process.argv[1] || '').replace(/\.(js|cmd|ps1|exe|bat)$/i, '');
+const envUnderscoreBase = path.basename(process.env._ || '').replace(/\.(js|cmd|ps1|exe|bat)$/i, '');
 const isAgyDashboard = invokedBase === 'agy-dashboard' ||
+  envUnderscoreBase === 'agy-dashboard' ||
   process.env.AGY_CLI_COMMAND === 'agy-dashboard' ||
   process.env.npm_lifecycle_event === 'dashboard';
 
@@ -43,9 +45,10 @@ if (isAgyDashboard) {
   if (!hasReportFlag) {
     const hasServe = args.some(a => a === '--serve' || a.startsWith('--serve=') || a === '--html' || a === '--dashboard');
     const hasOpen = args.includes('--open');
+    const hasNoOpen = args.includes('--no-open');
     const extra = [];
     if (!hasServe) extra.push('--serve');
-    if (!hasOpen) extra.push('--open');
+    if (!hasOpen && !hasNoOpen) extra.push('--open');
     cliArgv = [process.argv[0], process.argv[1], ...extra, ...args];
   }
 }

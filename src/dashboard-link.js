@@ -226,15 +226,19 @@ function removePortFile(portFile = DASHBOARD_SERVER_PORT_FILE) {
 }
 
 /**
- * Removes the port file ONLY when it currently points at the given port.
- * Used on graceful server shutdown so the hook never links to a dead port
- * while a different (still valid) server record must be preserved.
+ * Removes the port file ONLY when it currently points at the given port
+ * and was created by this process (or the recorded process is dead).
+ * Preserves the port file if another live server already rewrote it.
  * @param {number} port - Port of the server that stopped.
  * @param {string} [portFile] - Port file path (default: config constant).
+ * @param {number} [pid] - Server process id (default: current process).
  */
-function removePortFileIfPort(port, portFile = DASHBOARD_SERVER_PORT_FILE) {
+function removePortFileIfPort(port, portFile = DASHBOARD_SERVER_PORT_FILE, pid = process.pid) {
   const record = readPortFile(portFile);
   if (record && record.port === port) {
+    if (record.pid && pid && record.pid !== pid && isPidAlive(record.pid)) {
+      return; // another live server holds this record
+    }
     removePortFile(portFile);
   }
 }

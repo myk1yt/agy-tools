@@ -1184,13 +1184,14 @@ async function runAllTests() {
       const pkgJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
       assert.strictEqual(pkgJson.name, 'agy-tools');
       assert.strictEqual(pkgJson.bin['agy-tools'], './bin/agy-tools.js');
-      assert.strictEqual(pkgJson.bin['agy-dashboard'], './bin/agy-tokens.js');
+      assert.strictEqual(pkgJson.bin['agy-dashboard'], './bin/agy-dashboard.js');
       assert.strictEqual(pkgJson.bin['agy-tokens'], './bin/agy-tokens.js');
     });
 
     await test('Should have valid executable entry files', () => {
       assert(fs.existsSync(path.join(__dirname, '..', 'bin', 'agy-tokens.js')));
       assert(fs.existsSync(path.join(__dirname, '..', 'bin', 'agy-tools.js')));
+      assert(fs.existsSync(path.join(__dirname, '..', 'bin', 'agy-dashboard.js')));
     });
 
     await test('Statusline-only concept: integrations/skills/ must NOT exist (no skills regression guard)', () => {
@@ -2881,6 +2882,17 @@ async function runAllTests() {
       }
     });
 
+    await test('removePortFileIfPort preserves record when another live process owns the port', async () => {
+      const portFile = path.join(os.tmpdir(), `agy-test-rmif-live-${process.pid}.json`);
+      try {
+        dashboardLink.writePortFile(8976, process.pid, portFile);
+        dashboardLink.removePortFileIfPort(8976, portFile, 99999998);
+        assert(dashboardLink.readPortFile(portFile) !== null, 'port file must be preserved when owned by another live PID');
+      } finally {
+        dashboardLink.removePortFile(portFile);
+      }
+    });
+
     await test('isPidAlive should accurately detect live and dead processes', () => {
       assert.strictEqual(dashboardLink.isPidAlive(process.pid), true);
       assert.strictEqual(dashboardLink.isPidAlive(99999999), false);
@@ -3440,13 +3452,15 @@ async function runAllTests() {
 
       // Wait for idle timeout
       await new Promise((resolve) => {
+        let timeout;
         const check = setInterval(() => {
           if (terminationReason !== null) {
             clearInterval(check);
+            if (timeout) clearTimeout(timeout);
             resolve();
           }
         }, 20);
-        setTimeout(() => {
+        timeout = setTimeout(() => {
           clearInterval(check);
           resolve();
         }, 3000);
@@ -5092,6 +5106,7 @@ async function runAllTests() {
   // --- Suite 26: CLI Dispatcher & Dashboard Routing ---
   await describe('26. CLI Dispatcher & Dashboard Routing', async () => {
     const { spawnSync } = require('child_process');
+    const serve = require('../src/serve');
 
     await test('agy-tools dashboard routes to --serve --open when no flags provided', () => {
       const agyToolsPath = path.join(__dirname, '..', 'bin', 'agy-tools.js');
@@ -5100,19 +5115,51 @@ async function runAllTests() {
       const res7d = spawnSync(process.execPath, [agyToolsPath, 'dashboard', '--7d', '--help'], { encoding: 'utf8' });
       assert.strictEqual(res7d.status, 0);
 
-      // Test package.json scripts.dashboard
+      // Test package.json binary mapping and scripts.dashboard
       const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-      assert.strictEqual(pkg.scripts.dashboard, 'node bin/agy-tokens.js --serve --open');
+      assert.strictEqual(pkg.bin['agy-dashboard'], './bin/agy-dashboard.js');
+      assert.strictEqual(pkg.scripts.dashboard, 'node bin/agy-dashboard.js');
     });
 
-    await test('agy-tokens routes to --serve --open when invoked as agy-dashboard', () => {
-      const agyTokensPath = path.join(__dirname, '..', 'bin', 'agy-tokens.js');
-      const res = spawnSync(process.execPath, [agyTokensPath, '--help'], {
-        encoding: 'utf8',
-        env: { ...process.env, AGY_CLI_COMMAND: 'agy-dashboard' }
-      });
+    await test('bin/agy-dashboard.js entry point exists and invokes agy-tokens with AGY_CLI_COMMAND', () => {
+      const dashboardEntry = path.join(__dirname, '..', 'bin', 'agy-dashboard.js');
+      assert(fs.existsSync(dashboardEntry), 'bin/agy-dashboard.js must exist');
+
+      const res = spawnSync(process.execPath, [dashboardEntry, '--help'], { encoding: 'utf8' });
       assert.strictEqual(res.status, 0);
       assert(res.stdout.includes('Antigravity Token Tracker') || res.stdout.includes('Usage'));
+    });
+
+    await test('parseArgs should respect --no-open flag', () => {
+      const opts = parseArgs(['node', 'bin/agy-tokens.js', '--open', '--no-open']);
+      assert.strictEqual(opts.open, false);
+
+      const optsNoOpenAlone = parseArgs(['node', 'bin/agy-tokens.js', '--no-open']);
+      assert.strictEqual(optsNoOpenAlone.open, false);
+    });
+
+    await test('dashboard server should handle OPTIONS CORS preflight with 204 No Content', async () => {
+      const http = require('http');
+      const info = await serve.startDashboardServer({ port: 0, idleTimeoutMs: 10000 });
+      try {
+        const status = await new Promise((resolve, reject) => {
+          const req = http.request({
+            port: info.port,
+            host: '127.0.0.1',
+            method: 'OPTIONS',
+            path: '/events'
+          }, (res) => {
+            assert.strictEqual(res.headers['access-control-allow-origin'], '*');
+            assert(res.headers['access-control-allow-methods'].includes('OPTIONS'));
+            resolve(res.statusCode);
+          });
+          req.on('error', reject);
+          req.end();
+        });
+        assert.strictEqual(status, 204);
+      } finally {
+        await serve.stopDashboardServer(info.server);
+      }
     });
   });
 
@@ -5123,9 +5170,7 @@ async function runAllTests() {
   console.log(`  Duration: ${duration}ms`);
   console.log('=======================================================\x1b[0m\n');
 
-  if (failedTests > 0) {
-    process.exit(1);
-  }
+  process.exit(failedTests > 0 ? 1 : 0);
 }
 
 runAllTests().catch(err => {

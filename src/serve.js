@@ -140,6 +140,17 @@ function startDashboardServer(opts = {}) {
         // CORS for file:// pages (origin null) — E10; localhost-only server (C6)
         res.setHeader('Access-Control-Allow-Origin', '*');
 
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Access-Control-Allow-Headers': '*',
+            'Cache-Control': 'no-store'
+          });
+          res.end();
+          return;
+        }
+
         const urlPath = (req.url || '/').split('?')[0];
 
         if (urlPath === '/' || urlPath === '/index.html') {
@@ -218,6 +229,19 @@ function startDashboardServer(opts = {}) {
 
         if (urlPath === '/data.json') {
           try {
+            if (!fs.existsSync(DASHBOARD_DATA_JSON)) {
+              try {
+                const payload = await aggregate();
+                const { writeDashboardFiles } = require('./html-report');
+                writeDashboardFiles(payload, {
+                  force: true,
+                  refreshSec: opts.refreshSec,
+                  servePort: boundPortRef || port
+                });
+              } catch (_genErr) {
+                // Fallback gracefully
+              }
+            }
             const json = fs.readFileSync(DASHBOARD_DATA_JSON, 'utf8');
             res.writeHead(200, {
               'Content-Type': 'application/json; charset=utf-8',
@@ -233,6 +257,19 @@ function startDashboardServer(opts = {}) {
 
         if (urlPath === '/dashboard-data.js') {
           try {
+            if (!fs.existsSync(DASHBOARD_DATA_JS)) {
+              try {
+                const payload = await aggregate();
+                const { writeDashboardFiles } = require('./html-report');
+                writeDashboardFiles(payload, {
+                  force: true,
+                  refreshSec: opts.refreshSec,
+                  servePort: boundPortRef || port
+                });
+              } catch (_genErr) {
+                // Fallback gracefully
+              }
+            }
             const dataJs = fs.readFileSync(DASHBOARD_DATA_JS, 'utf8');
             res.writeHead(200, {
               'Content-Type': 'text/javascript; charset=utf-8',

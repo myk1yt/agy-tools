@@ -5,13 +5,13 @@
   "main": "src/index.js",
   "bin": {
     "agy-tools": "./bin/agy-tools.js",
-    "agy-dashboard": "./bin/agy-tokens.js",
+    "agy-dashboard": "./bin/agy-dashboard.js",
     "agy-tokens": "./bin/agy-tokens.js",
     "antigravity-tools": "./bin/agy-tools.js"
   },
   "scripts": {
     "start": "node bin/agy-tools.js",
-    "dashboard": "node bin/agy-tokens.js --serve --open",
+    "dashboard": "node bin/agy-dashboard.js",
     "test": "node test/run-tests.js"
   },
   "keywords": [

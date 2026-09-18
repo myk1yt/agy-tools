@@ -29,6 +29,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 chmod +x "$ROOT_DIR/bin/agy-tools.js" 2>/dev/null || true
 chmod +x "$ROOT_DIR/bin/agy-tokens.js" 2>/dev/null || true
+chmod +x "$ROOT_DIR/bin/agy-dashboard.js" 2>/dev/null || true
 
 echo "[INFO] Linking agy-tools globally via npm link..."
 cd "$ROOT_DIR"

@@ -112,9 +112,10 @@ async function main() {
     // Default for `dashboard`: launch the web dashboard
     const hasServe = subArgs.some(a => a === '--serve' || a.startsWith('--serve=') || a === '--html' || a === '--dashboard');
     const hasOpen = subArgs.includes('--open');
+    const hasNoOpen = subArgs.includes('--no-open');
     const extra = [];
     if (!hasServe) extra.push('--serve');
-    if (!hasOpen) extra.push('--open');
+    if (!hasOpen && !hasNoOpen) extra.push('--open');
 
     const forwardedArgv = [process.argv[0], process.argv[1], ...extra, ...subArgs];
     await runCli(forwardedArgv);

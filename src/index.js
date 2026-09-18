@@ -152,6 +152,8 @@ function parseArgs(argv) {
       options.servePort = parseInt(arg.split('=')[1], 10);
     } else if (arg === '--open') {
       options.open = true;
+    } else if (arg === '--no-open') {
+      options.open = false;
     } else if (arg === '--write-dashboard') {
       options.writeDashboard = true;
     } else if (arg === '--no-link') {
