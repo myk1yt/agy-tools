@@ -4982,6 +4982,136 @@ async function runAllTests() {
           fs.rmSync(tmp, { recursive: true, force: true });
         }
       });
+
+      await test('Candidate port fallback: when 401 port is first in candidate list, fetchLiveGeminiQuota falls through to 200 port and clears cooldown', async () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cand-401-first-'));
+        const cachePath = path.join(tmp, 'gemini_quota_cache.json');
+        const markerPath = path.join(tmp, 'gemini_quota_probe_cooldown.json');
+
+        const server401 = http.createServer((req, res) => {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ code: 'unauthenticated', message: 'invalid CSRF token' }));
+        });
+        const server200 = http.createServer((req, res) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            response: {
+              groups: [
+                {
+                  displayName: 'Gemini Models',
+                  buckets: [
+                    {
+                      bucketId: 'gemini-5h',
+                      window: '5h',
+                      remainingFraction: 0.70,
+                      resetTime: new Date(Date.now() + 7200000).toISOString()
+                    }
+                  ]
+                }
+              ]
+            }
+          }));
+        });
+
+        await new Promise(r => server401.listen(0, '127.0.0.1', r));
+        await new Promise(r => server200.listen(0, '127.0.0.1', r));
+        const port401 = server401.address().port;
+        const port200 = server200.address().port;
+
+        try {
+          fs.writeFileSync(markerPath, JSON.stringify({
+            version: 2, reason: 'auth_failure', expiryMs: Date.now() + 600000
+          }), 'utf8');
+
+          const res = await geminiQuota.fetchLiveGeminiQuota({
+            discover: async () => ({
+              pid: 3700,
+              pids: [38004, 3700],
+              port: port401,
+              ports: [port401, port200],
+              csrfToken: 'tok-valid',
+              protocol: 'http'
+            }),
+            cachePath,
+            cooldownMarker: markerPath,
+            forceRefresh: true
+          });
+
+          assert.strictEqual(res.isLive, true, 'Must succeed on secondary port despite 401 on primary port');
+          assert.strictEqual(res.remainPercent, 70);
+          assert.strictEqual(fs.existsSync(markerPath), false, 'Cooldown marker must be removed on eventual success');
+
+          const cached = geminiQuota.getCachedGeminiQuota(cachePath, 30000);
+          assert.strictEqual(cached.isFresh, true);
+          assert.strictEqual(cached.isStale, false);
+          assert.strictEqual(cached.lastError, undefined, 'Successful probe must not have lastError');
+
+          const badge = formatter.stripAnsi(formatter.renderRealTimeBadge({
+            turnTokens: 50, turnCostUsd: 0.001, todayTokens: 500, todayCostUsd: 0.005,
+            cacheHitRate: 80, geminiQuota: cached
+          }));
+          assert(badge.includes('70%'), `Badge must show 70%, got: ${badge}`);
+          assert(!badge.includes('70%!'), `Badge must not have !, got: ${badge}`);
+          assert(!badge.includes('70%1'), `Badge must not have 1, got: ${badge}`);
+        } finally {
+          await new Promise(r => server401.close(r));
+          await new Promise(r => server200.close(r));
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      });
+
+      await test('validateTranscriptToken matches against discovery.pids array for multi-candidate processes', () => {
+        const validUuid = '12345678-1234-1234-1234-123456789abc';
+        const discovery = {
+          pid: 38004,
+          pids: [38004, 3700],
+          ports: [54457, 54713]
+        };
+        const hit = {
+          pid: 3700,
+          port: 54457,
+          ports: [54457],
+          csrfToken: validUuid
+        };
+        assert.strictEqual(geminiQuota.validateTranscriptToken(discovery, hit), true);
+
+        const hitMismatch = {
+          pid: 99999,
+          port: 54457,
+          ports: [54457],
+          csrfToken: validUuid
+        };
+        assert.strictEqual(geminiQuota.validateTranscriptToken(discovery, hitMismatch), false);
+      });
+
+      await test('extractPortsFromLsof parses all listening ports from lsof output', () => {
+        const lsofSample = `COMMAND   PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+agy      1234 user    3u  IPv4 0xdeadbeef      0t0  TCP 127.0.0.1:54457 (LISTEN)
+agy      1234 user    4u  IPv4 0xfeedface      0t0  TCP 127.0.0.1:54458 (LISTEN)
+agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
+`;
+        const ports = geminiQuota.extractPortsFromLsof(lsofSample);
+        assert.deepStrictEqual(ports, [54457, 54458]);
+
+        assert.deepStrictEqual(geminiQuota.extractPortsFromLsof(''), []);
+        assert.deepStrictEqual(geminiQuota.extractPortsFromLsof(null), []);
+      });
+
+      await test('buildDashboardPayload triggers triggerBackgroundQuotaRefresh when geminiQuota is missing or stale', () => {
+        let triggered = false;
+        const origTrigger = geminiQuota.triggerBackgroundQuotaRefresh;
+        geminiQuota.triggerBackgroundQuotaRefresh = () => { triggered = true; return true; };
+        try {
+          htmlReport.buildDashboardPayload([], { geminiQuota: { isFresh: false, remainPercent: 50 } });
+          assert.strictEqual(triggered, true, 'Must trigger background refresh when quota is stale');
+
+          triggered = false;
+          htmlReport.buildDashboardPayload([], { geminiQuota: { isFresh: true, remainPercent: 50 } });
+          assert.strictEqual(triggered, false, 'Must NOT trigger background refresh when quota is fresh');
+        } finally {
+          geminiQuota.triggerBackgroundQuotaRefresh = origTrigger;
+        }
+      });
     }
   });
 

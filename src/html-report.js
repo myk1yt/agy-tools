@@ -287,6 +287,9 @@ function buildDashboardPayload(sessions, opts = {}) {
   const last30dSummary = summarizeRange(dateKeys, '30d');
   const rollingUsage = getRollingUsage(list, refDate, opts.quota || null);
   const geminiQuota = opts.geminiQuota !== undefined ? opts.geminiQuota : geminiQuotaModule.getCachedGeminiQuota();
+  if (!geminiQuota || !geminiQuota.isFresh) {
+    geminiQuotaModule.triggerBackgroundQuotaRefresh();
+  }
 
   return {
     version: DASHBOARD_PAYLOAD_VERSION,

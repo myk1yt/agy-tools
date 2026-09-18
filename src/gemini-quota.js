@@ -392,6 +392,26 @@ function extractPortFromLsof(lsofOutput) {
 }
 
 /**
+ * Parses POSIX lsof output to find all local listening ports for a given PID.
+ * @param {string} lsofOutput
+ * @returns {Array<number>}
+ */
+function extractPortsFromLsof(lsofOutput) {
+  if (!lsofOutput) return [];
+  const ports = [];
+  const matches = lsofOutput.matchAll(/:(?:(\d+))\s+\(LISTEN\)/gi);
+  for (const m of matches) {
+    const p = parseInt(m[1], 10);
+    if (p && !ports.includes(p)) ports.push(p);
+  }
+  if (ports.length === 0) {
+    const fallback = extractPortFromLsof(lsofOutput);
+    if (fallback && !ports.includes(fallback)) ports.push(fallback);
+  }
+  return ports;
+}
+
+/**
  * Discovers running Language Server processes across Windows and POSIX systems.
  * Looks for language_server, agy.exe, and process arguments with --csrf_token.
  * @param {object} [opts]
@@ -428,17 +448,22 @@ async function discoverLanguageServer(opts = {}) {
           if (!Array.isArray(items)) items = [items];
           let primary = null;
           const allCandidatePorts = [];
+          const allCandidatePids = [];
           let netstatOut = null;
 
           for (const item of items) {
-            if (!item || !item.CommandLine) continue;
+            if (!item || !item.ProcessId) continue;
             const pid = item.ProcessId;
-            const { csrfToken, port, protocol } = parseCommandLine(item.CommandLine);
+            const { csrfToken, port, protocol } = parseCommandLine(item.CommandLine || '');
             if (port) {
               if (!primary) {
                 primary = { pid, port, ports: [port], csrfToken: csrfToken || '', protocol: protocol || null };
+              } else {
+                if (!primary.csrfToken && csrfToken) primary.csrfToken = csrfToken;
+                if (!primary.protocol && protocol) primary.protocol = protocol;
               }
               if (!allCandidatePorts.includes(port)) allCandidatePorts.push(port);
+              if (!allCandidatePids.includes(pid)) allCandidatePids.push(pid);
               continue;
             }
             // Port not in commandline, query netstat
@@ -450,10 +475,14 @@ async function discoverLanguageServer(opts = {}) {
               if (netPorts.length > 0) {
                 if (!primary) {
                   primary = { pid, port: netPorts[0], ports: netPorts, csrfToken: csrfToken || '', protocol: protocol || null };
+                } else {
+                  if (!primary.csrfToken && csrfToken) primary.csrfToken = csrfToken;
+                  if (!primary.protocol && protocol) primary.protocol = protocol;
                 }
                 for (const np of netPorts) {
                   if (!allCandidatePorts.includes(np)) allCandidatePorts.push(np);
                 }
+                if (!allCandidatePids.includes(pid)) allCandidatePids.push(pid);
               }
             } catch (_ne) {
               // Ignore netstat error
@@ -461,6 +490,7 @@ async function discoverLanguageServer(opts = {}) {
           }
           if (primary) {
             primary.ports = allCandidatePorts.length > 0 ? allCandidatePorts : primary.ports;
+            primary.pids = allCandidatePids.length > 0 ? allCandidatePids : [primary.pid];
             return finish(primary);
           }
         } catch (_pe) {
@@ -476,6 +506,7 @@ async function discoverLanguageServer(opts = {}) {
         const candidates = lines.slice().reverse();
         let primary = null;
         const allCandidatePorts = [];
+        const allCandidatePids = [];
         for (const line of candidates) {
           if ((/language_server/i.test(line) || /agy/i.test(line) || /csrf/i.test(line)) && !/grep|ps -ax/i.test(line)) {
             const trimmed = line.trim();
@@ -487,19 +518,29 @@ async function discoverLanguageServer(opts = {}) {
               if (port) {
                 if (!primary) {
                   primary = { pid, port, ports: [port], csrfToken: csrfToken || '', protocol: protocol || null };
+                } else {
+                  if (!primary.csrfToken && csrfToken) primary.csrfToken = csrfToken;
+                  if (!primary.protocol && protocol) primary.protocol = protocol;
                 }
                 if (!allCandidatePorts.includes(port)) allCandidatePorts.push(port);
+                if (!allCandidatePids.includes(pid)) allCandidatePids.push(pid);
                 continue;
               }
               // Port not in commandline, query lsof
               try {
                 const lsofOut = execSync(`lsof -a -p ${pid} -iTCP -sTCP:LISTEN -P -n`, { encoding: 'utf8', timeout: 1000, windowsHide: true });
-                const lsofPort = extractPortFromLsof(lsofOut);
-                if (lsofPort) {
+                const lsofPorts = extractPortsFromLsof(lsofOut);
+                if (lsofPorts.length > 0) {
                   if (!primary) {
-                    primary = { pid, port: lsofPort, ports: [lsofPort], csrfToken: csrfToken || '', protocol: protocol || null };
+                    primary = { pid, port: lsofPorts[0], ports: lsofPorts, csrfToken: csrfToken || '', protocol: protocol || null };
+                  } else {
+                    if (!primary.csrfToken && csrfToken) primary.csrfToken = csrfToken;
+                    if (!primary.protocol && protocol) primary.protocol = protocol;
                   }
-                  if (!allCandidatePorts.includes(lsofPort)) allCandidatePorts.push(lsofPort);
+                  for (const lp of lsofPorts) {
+                    if (!allCandidatePorts.includes(lp)) allCandidatePorts.push(lp);
+                  }
+                  if (!allCandidatePids.includes(pid)) allCandidatePids.push(pid);
                 }
               } catch (_le) {
                 // Ignore lsof error
@@ -509,6 +550,7 @@ async function discoverLanguageServer(opts = {}) {
         }
         if (primary) {
           primary.ports = allCandidatePorts.length > 0 ? allCandidatePorts : primary.ports;
+          primary.pids = allCandidatePids.length > 0 ? allCandidatePids : [primary.pid];
           return finish(primary);
         }
         finish(null);
@@ -590,7 +632,9 @@ function extractDiscoveryHits(content) {
  */
 function validateTranscriptToken(discovery, hit) {
   if (!discovery || !hit || !isCsrfUuid(hit.csrfToken)) return false;
-  if (typeof discovery.pid === 'number' && discovery.pid > 0) {
+  if (Array.isArray(discovery.pids) && discovery.pids.length > 0) {
+    if (!discovery.pids.includes(hit.pid)) return false;
+  } else if (typeof discovery.pid === 'number' && discovery.pid > 0) {
     if (hit.pid !== discovery.pid) return false;
   }
   const knownPorts = Array.isArray(discovery.ports) && discovery.ports.length > 0
@@ -1283,6 +1327,7 @@ async function fetchLiveGeminiQuota(opts = {}) {
     // "http: TLS handshake error ... client sent an HTTP request to an HTTPS server".
     let pinnedHttpsOnly = false;
     let discoveredPid;
+    let discoveredPids = [];
 
     // FY-2026-09-12-001: honor the negative-probe cooldown BEFORE spawning any
     // discovery work — this is what stops the TLS-handshake-error flood while
@@ -1322,6 +1367,9 @@ async function fetchLiveGeminiQuota(opts = {}) {
         csrfToken = csrfToken !== undefined ? csrfToken : discovered.csrfToken;
         discoveredProtocol = discovered.protocol || null;
         discoveredPid = discovered.pid;
+        discoveredPids = Array.isArray(discovered.pids) && discovered.pids.length > 0
+          ? discovered.pids
+          : (discovered.pid ? [discovered.pid] : []);
         if (csrfToken) tokenSource = 'command_line';
       }
     }
@@ -1336,7 +1384,7 @@ async function fetchLiveGeminiQuota(opts = {}) {
     // HTTPS, so a plain HTTP request is never sent against an HTTPS port.
     if (!csrfToken && candidatePorts.length > 0 && !hasExplicitTarget) {
       const fb = resolveCsrfTokenFallback(
-        { pid: discoveredPid, ports: candidatePorts, port: candidatePorts[0], csrfToken: '' },
+        { pid: discoveredPid, pids: discoveredPids, ports: candidatePorts, port: candidatePorts[0], csrfToken: '' },
         opts.transcriptScan || {}
       );
       tokenSource = fb.tokenSource;
@@ -1651,6 +1699,7 @@ module.exports = {
   extractPortsFromNetstat,
   extractPortFromNetstat,
   extractPortFromLsof,
+  extractPortsFromLsof,
   discoverLanguageServer,
   isCsrfUuid,
   extractDiscoveryHits,
