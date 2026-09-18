@@ -5369,6 +5369,330 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
     });
   });
 
+  // --- Suite 27: Real-Time Dashboard Server Watcher & Live SSE Broadcast Integration ---
+  await describe('27. Real-Time Dashboard Server Watcher & Live SSE Broadcast Integration', async () => {
+    const serve = require('../src/serve');
+    const htmlReport = require('../src/html-report');
+
+    await test('fs.watch detects session token logging and broadcasts SSE update to client in real-time', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-token-test-'));
+      const brainDir = path.join(tempDir, 'brain');
+      const cacheFile = path.join(tempDir, 'token-cache.json');
+      const quotaCacheFile = path.join(tempDir, 'gemini_quota_cache.json');
+      fs.mkdirSync(brainDir, { recursive: true });
+
+      const info = await serve.startDashboardServer({
+        port: 0,
+        intervalMs: 60000, // long interval to ensure update is triggered by fs.watch
+        brainDir,
+        cacheFile,
+        quotaCacheFile
+      });
+
+      assert(info && info.port > 0);
+
+      const receivedEvents = [];
+      let reqRef = null;
+
+      const sseConnectedPromise = new Promise((resolve) => {
+        reqRef = http.get(`${info.url.replace(/\/$/, '')}/events`, (res) => {
+          let buffer = '';
+          res.on('data', (chunk) => {
+            buffer += chunk.toString();
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+            for (const part of parts) {
+              if (part.includes('data:')) {
+                const dataLine = part.split('\n').find((l) => l.startsWith('data:'));
+                if (dataLine) {
+                  try {
+                    const parsed = JSON.parse(dataLine.slice(5).trim());
+                    receivedEvents.push(parsed);
+                    resolve();
+                  } catch (_e) {}
+                }
+              }
+            }
+          });
+        });
+        reqRef.on('error', () => {});
+      });
+
+      // Wait for initial SSE connection
+      await sseConnectedPromise;
+      assert(receivedEvents.length >= 1, 'Initial SSE payload must be received');
+
+      // Now simulate a new session turn written to brain directory
+      const sessionDir = path.join(brainDir, 'session-test-realtime-1');
+      fs.mkdirSync(sessionDir, { recursive: true });
+      const transcriptFile = path.join(sessionDir, 'transcript.jsonl');
+      const turnLine = JSON.stringify({
+        source: 'USER_INPUT',
+        content: 'Testing real-time token tracking with a live user prompt message',
+        created_at: new Date().toISOString()
+      }) + '\n';
+      fs.writeFileSync(transcriptFile, turnLine, 'utf8');
+
+      // Await live SSE push triggered by fs.watch (within 2.5s)
+      const updatedEvent = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Timeout waiting for real-time token SSE push'));
+        }, 3500);
+
+        const check = setInterval(() => {
+          for (let i = 1; i < receivedEvents.length; i++) {
+            const ev = receivedEvents[i];
+            if (ev && ev.version === 3 && ev.summaries && ev.summaries.today && ev.summaries.today.totalTokens > 0) {
+              clearTimeout(timeout);
+              clearInterval(check);
+              resolve(ev);
+              return;
+            }
+          }
+        }, 50);
+      });
+
+      assert(updatedEvent.summaries.today.totalTokens >= 500, 'Live SSE update must include new tokens');
+
+      // Verify GET /data.json serves the updated payload
+      const dataJsonRes = await new Promise((resolve, reject) => {
+        http.get(`${info.url.replace(/\/$/, '')}/data.json`, (res) => {
+          let body = '';
+          res.on('data', (c) => { body += c; });
+          res.on('end', () => resolve(JSON.parse(body)));
+        }).on('error', reject);
+      });
+
+      assert(dataJsonRes.summaries.today.totalTokens >= 500, 'GET /data.json must serve updated tokens');
+
+      if (reqRef) reqRef.destroy();
+      await serve.stopDashboardServer(info.server);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('fs.watch detects quota changes and broadcasts live quota to SSE clients', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-quota-test-'));
+      const brainDir = path.join(tempDir, 'brain');
+      const cacheFile = path.join(tempDir, 'token-cache.json');
+      const quotaCacheFile = path.join(tempDir, 'gemini_quota_cache.json');
+      fs.mkdirSync(brainDir, { recursive: true });
+
+      // Write initial quota snapshot
+      fs.writeFileSync(quotaCacheFile, JSON.stringify({
+        timestampMs: Date.now(),
+        isFresh: true,
+        isLive: true,
+        remainPercent: 50.0,
+        quota5h: { remainPercent: 40.0, resetFormatted: '3h 10m' },
+        quota7d: { remainPercent: 60.0, resetFormatted: '4d 2h' }
+      }, null, 2), 'utf8');
+
+      const info = await serve.startDashboardServer({
+        port: 0,
+        intervalMs: 60000,
+        brainDir,
+        cacheFile,
+        quotaCacheFile
+      });
+
+      const receivedEvents = [];
+      let reqRef = null;
+
+      await new Promise((resolve) => {
+        reqRef = http.get(`${info.url.replace(/\/$/, '')}/events`, (res) => {
+          let buffer = '';
+          res.on('data', (chunk) => {
+            buffer += chunk.toString();
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+            for (const part of parts) {
+              if (part.includes('data:')) {
+                const dataLine = part.split('\n').find((l) => l.startsWith('data:'));
+                if (dataLine) {
+                  try {
+                    const parsed = JSON.parse(dataLine.slice(5).trim());
+                    receivedEvents.push(parsed);
+                    resolve();
+                  } catch (_e) {}
+                }
+              }
+            }
+          });
+        });
+        reqRef.on('error', () => {});
+      });
+
+      // Update quota on disk
+      fs.writeFileSync(quotaCacheFile, JSON.stringify({
+        timestampMs: Date.now(),
+        isFresh: true,
+        isLive: true,
+        remainPercent: 94.5,
+        quota5h: { remainPercent: 89.0, resetFormatted: '1h 30m' },
+        quota7d: { remainPercent: 97.2, resetFormatted: '6d 18h' }
+      }, null, 2), 'utf8');
+
+      // Await live quota update via SSE
+      const updatedQuotaEvent = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Timeout waiting for real-time quota SSE push'));
+        }, 3500);
+
+        const check = setInterval(() => {
+          for (let i = 1; i < receivedEvents.length; i++) {
+            const ev = receivedEvents[i];
+            if (ev && ev.geminiQuota && ev.geminiQuota.remainPercent === 94.5) {
+              clearTimeout(timeout);
+              clearInterval(check);
+              resolve(ev);
+              return;
+            }
+          }
+        }, 50);
+      });
+
+      assert.strictEqual(updatedQuotaEvent.geminiQuota.remainPercent, 94.5);
+      assert.strictEqual(updatedQuotaEvent.geminiQuota.quota5h.remainPercent, 89.0);
+
+      // Verify GET /data.json returns fresh quota
+      const dataJson = await new Promise((resolve, reject) => {
+        http.get(`${info.url.replace(/\/$/, '')}/data.json`, (res) => {
+          let body = '';
+          res.on('data', (c) => { body += c; });
+          res.on('end', () => resolve(JSON.parse(body)));
+        }).on('error', reject);
+      });
+
+      assert.strictEqual(dataJson.geminiQuota.remainPercent, 94.5);
+
+      if (reqRef) reqRef.destroy();
+      await serve.stopDashboardServer(info.server);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    await test('broadcastSSE pushes updates to all concurrent SSE clients', async () => {
+      const info = await serve.startDashboardServer({ port: 0, intervalMs: 60000 });
+      const client1Events = [];
+      const client2Events = [];
+      let req1 = null;
+      let req2 = null;
+
+      const connectClient = (eventsArr) => new Promise((resolve) => {
+        const req = http.get(`${info.url.replace(/\/$/, '')}/events`, (res) => {
+          let buffer = '';
+          res.on('data', (chunk) => {
+            buffer += chunk.toString();
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+            for (const part of parts) {
+              if (part.includes('data:')) {
+                const dataLine = part.split('\n').find((l) => l.startsWith('data:'));
+                if (dataLine) {
+                  try {
+                    eventsArr.push(JSON.parse(dataLine.slice(5).trim()));
+                    resolve();
+                  } catch (_e) {}
+                }
+              }
+            }
+          });
+        });
+        req.on('error', () => {});
+        return req;
+      });
+
+      req1 = await new Promise(async (r) => { const req = await connectClient(client1Events); r(req); });
+      req2 = await new Promise(async (r) => { const req = await connectClient(client2Events); r(req); });
+
+      assert(client1Events.length >= 1);
+      assert(client2Events.length >= 1);
+
+      // Broadcast an update
+      const mockPayload = { version: 3, dailyModels: {}, broadcastTest: true, generatedAt: new Date().toISOString() };
+      info.broadcastSSE(mockPayload);
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      assert(client1Events.some((e) => e.broadcastTest === true), 'Client 1 must receive broadcast');
+      assert(client2Events.some((e) => e.broadcastTest === true), 'Client 2 must receive broadcast');
+
+      if (req1) req1.destroy();
+      if (req2) req2.destroy();
+      await serve.stopDashboardServer(info.server);
+    });
+
+    await test('GET / serves fresh HTML with current port baked into SSE hint', async () => {
+      const info = await serve.startDashboardServer({ port: 0 });
+
+      const { statusCode, headers, body } = await new Promise((resolve, reject) => {
+        http.get(info.url, (res) => {
+          let body = '';
+          res.on('data', (c) => { body += c; });
+          res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, body }));
+        }).on('error', reject);
+      });
+
+      assert.strictEqual(statusCode, 200);
+      assert.strictEqual(headers['cache-control'], 'no-store');
+      assert(body.includes(`SSE_PORT_HINT = ${info.port}`));
+      assert(body.includes("getSseUrl()"));
+      assert(body.includes("return '/events'"));
+
+      await serve.stopDashboardServer(info.server);
+    });
+
+    await test('GET /dashboard-data.js serves fresh script matching newest aggregate', async () => {
+      const info = await serve.startDashboardServer({ port: 0 });
+
+      const { statusCode, headers, body } = await new Promise((resolve, reject) => {
+        http.get(`${info.url.replace(/\/$/, '')}/dashboard-data.js`, (res) => {
+          let body = '';
+          res.on('data', (c) => { body += c; });
+          res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, body }));
+        }).on('error', reject);
+      });
+
+      assert.strictEqual(statusCode, 200);
+      assert.strictEqual(headers['cache-control'], 'no-store');
+      assert(body.startsWith('window.__AGY_DASH__ = '));
+      const jsonStr = body.slice('window.__AGY_DASH__ = '.length).trim().replace(/;$/, '');
+      const parsed = JSON.parse(jsonStr);
+      assert.strictEqual(parsed.version, 3);
+
+      await serve.stopDashboardServer(info.server);
+    });
+
+    await test('abrupt client disconnect during broadcast is handled gracefully without uncaught exceptions', async () => {
+      const info = await serve.startDashboardServer({ port: 0, intervalMs: 60000 });
+
+      const req = http.get(`${info.url.replace(/\/$/, '')}/events`, (res) => {
+        res.on('data', () => {
+          // Immediately destroy socket while in stream
+          req.destroy();
+        });
+      });
+      req.on('error', () => {});
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Broadcast while client is dead/destroyed
+      info.broadcastSSE({ version: 3, dailyModels: {}, test: 'abrupt-disconnect' });
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Server should still be healthy and responding to requests
+      const dataJson = await new Promise((resolve, reject) => {
+        http.get(`${info.url.replace(/\/$/, '')}/data.json`, (res) => {
+          let body = '';
+          res.on('data', (c) => { body += c; });
+          res.on('end', () => resolve(JSON.parse(body)));
+        }).on('error', reject);
+      });
+      assert.strictEqual(dataJson.version, 3);
+
+      await serve.stopDashboardServer(info.server);
+    });
+  });
+
   // --- Summary & Exit Code ---
   const duration = Date.now() - startTime;
   console.log('\n\x1b[1m=======================================================');
