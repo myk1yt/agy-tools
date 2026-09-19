@@ -156,12 +156,20 @@ function startDashboardServer(opts = {}) {
       let lastActivityAt = Date.now();
       const sseClients = new Set();
       const watchers = [];
-      const reattachTimers = new Set();
+      const pendingReattachTimers = new Map();
       let debounceTimer = null;
       let periodicTimer = null;
       let watchdog = null;
+      let isWritingDashboard = false;
 
       const quotaDir = path.dirname(targetQuotaCacheFile);
+      const tokenCacheDir = path.dirname(targetCacheFile);
+      const brainParent = path.dirname(targetBrainDir);
+      const historyFile = path.join(brainParent, 'history.jsonl');
+
+      let lastQuotaMtime = fs.existsSync(targetQuotaCacheFile) ? fs.statSync(targetQuotaCacheFile).mtimeMs : 0;
+      let lastCacheMtime = fs.existsSync(targetCacheFile) ? fs.statSync(targetCacheFile).mtimeMs : 0;
+      let lastHistoryMtime = fs.existsSync(historyFile) ? fs.statSync(historyFile).mtimeMs : 0;
 
       const CORS_HEADERS = {
         'Access-Control-Allow-Origin': '*',
@@ -214,13 +222,7 @@ function startDashboardServer(opts = {}) {
             return;
           }
           try {
-            // Check for late-created cache or brain files to ensure watchers are active
-            if (fs.existsSync(targetQuotaCacheFile) && !watchers.some(w => w._agyTarget === targetQuotaCacheFile)) {
-              attachWatcher(targetQuotaCacheFile, false, 'quota-cache');
-            }
-            if (fs.existsSync(targetCacheFile) && !watchers.some(w => w._agyTarget === targetCacheFile)) {
-              attachWatcher(targetCacheFile, false, 'token-cache');
-            }
+            // Check for late-created brain or quota directories
             if (fs.existsSync(targetBrainDir) && !watchers.some(w => w._agyTarget === targetBrainDir)) {
               attachWatcher(targetBrainDir, true, 'brain');
             }
@@ -230,13 +232,18 @@ function startDashboardServer(opts = {}) {
 
             const payload = await aggregate();
             latestPayload = payload;
-            try {
-              writeDashboardFiles(payload, {
-                force: false,
-                refreshSec: opts.refreshSec,
-                servePort: boundPortRef || port
-              });
-            } catch (_wErr) {}
+            if (!isWritingDashboard) {
+              try {
+                isWritingDashboard = true;
+                writeDashboardFiles(payload, {
+                  force: false,
+                  refreshSec: opts.refreshSec,
+                  servePort: boundPortRef || port
+                });
+              } catch (_wErr) {} finally {
+                isWritingDashboard = false;
+              }
+            }
             broadcastSSE(payload);
           } catch (_err) {}
         }, 150);
@@ -251,34 +258,89 @@ function startDashboardServer(opts = {}) {
        */
       function attachWatcher(targetPath, recursive, label) {
         if (!targetPath || !fs.existsSync(targetPath)) return null;
+        // Never attach duplicate watchers for the same targetPath
+        const existing = watchers.find(w => w._agyTarget === targetPath);
+        if (existing) return existing;
+
+        let isDir = false;
         try {
-          const w = fs.watch(targetPath, { recursive }, (eventType, filename) => {
-            const fname = filename ? String(filename) : '';
-            if (fname) {
-              const baseName = path.basename(fname);
-              if (baseName.startsWith('.') || baseName.endsWith('.tmp') || baseName.includes('dashboard')) {
-                return;
-              }
-              if (label === 'gemini-dir' && !baseName.includes('gemini_quota_cache') && !baseName.includes('token_tracker_cache')) {
-                return;
-              }
+          isDir = fs.statSync(targetPath).isDirectory();
+        } catch (_e) {
+          return null;
+        }
+
+        const quotaBase = path.basename(targetQuotaCacheFile);
+        const cacheBase = path.basename(targetCacheFile);
+
+        const handleEvent = (eventType, filename) => {
+          const fname = filename ? String(filename) : '';
+          if (fname) {
+            const baseName = path.basename(fname);
+            if (baseName.startsWith('.') || baseName.endsWith('.tmp') || baseName.includes('dashboard')) {
+              return;
             }
-            notifyChange(`${label}:${filename || eventType}`);
-            // Re-attach watcher if file underwent atomic replacement (rename)
-            if (!recursive && eventType === 'rename' && fs.existsSync(targetPath)) {
-              const timer = setTimeout(() => {
-                reattachTimers.delete(timer);
-                if (terminated) return;
-                try {
-                  const idx = watchers.indexOf(w);
-                  if (idx !== -1) watchers.splice(idx, 1);
-                  try { w.close(); } catch (_e) {}
-                  attachWatcher(targetPath, false, label);
-                } catch (_reErr) {}
-              }, 50);
-              reattachTimers.add(timer);
+            if (label === 'gemini-dir' &&
+                !baseName.includes('gemini_quota_cache') &&
+                !baseName.includes('token_tracker_cache') &&
+                baseName !== quotaBase &&
+                baseName !== cacheBase) {
+              return;
             }
-          });
+            if (label === 'antigravity-dir' && !baseName.includes('history.jsonl')) {
+              return;
+            }
+          } else if (isDir) {
+            // filename is null on Windows or Linux directory watches: check mtime to avoid spurious triggers
+            let changed = false;
+            if (label === 'gemini-dir') {
+              try {
+                const qM = fs.existsSync(targetQuotaCacheFile) ? fs.statSync(targetQuotaCacheFile).mtimeMs : 0;
+                const cM = fs.existsSync(targetCacheFile) ? fs.statSync(targetCacheFile).mtimeMs : 0;
+                if (qM !== lastQuotaMtime || cM !== lastCacheMtime) {
+                  lastQuotaMtime = qM;
+                  lastCacheMtime = cM;
+                  changed = true;
+                }
+              } catch (_e) {}
+            } else if (label === 'antigravity-dir') {
+              try {
+                const hM = fs.existsSync(historyFile) ? fs.statSync(historyFile).mtimeMs : 0;
+                if (hM !== lastHistoryMtime) {
+                  lastHistoryMtime = hM;
+                  changed = true;
+                }
+              } catch (_e) {}
+            } else if (label === 'brain') {
+              changed = true;
+            }
+            if (!changed) return;
+          }
+
+          notifyChange(`${label}:${filename || eventType}`);
+
+          // Re-attach ONLY for single files (never directories!) undergoing atomic replacement (rename)
+          if (!isDir && eventType === 'rename' && fs.existsSync(targetPath)) {
+            if (pendingReattachTimers.has(targetPath)) {
+              clearTimeout(pendingReattachTimers.get(targetPath));
+            }
+            const timer = setTimeout(() => {
+              pendingReattachTimers.delete(targetPath);
+              if (terminated) return;
+              try {
+                const idx = watchers.findIndex(w => w._agyTarget === targetPath);
+                if (idx !== -1) {
+                  const oldW = watchers.splice(idx, 1)[0];
+                  try { oldW.close(); } catch (_e) {}
+                }
+                attachWatcher(targetPath, false, label);
+              } catch (_reErr) {}
+            }, 100);
+            pendingReattachTimers.set(targetPath, timer);
+          }
+        };
+
+        try {
+          const w = fs.watch(targetPath, { recursive }, handleEvent);
           w._agyTarget = targetPath;
           w.on('error', () => {
             const idx = watchers.indexOf(w);
@@ -293,19 +355,7 @@ function startDashboardServer(opts = {}) {
         } catch (_err) {
           if (recursive) {
             try {
-              const w2 = fs.watch(targetPath, { recursive: false }, (eventType, filename) => {
-                const fname = filename ? String(filename) : '';
-                if (fname) {
-                  const baseName = path.basename(fname);
-                  if (baseName.startsWith('.') || baseName.endsWith('.tmp') || baseName.includes('dashboard')) {
-                    return;
-                  }
-                  if (label === 'gemini-dir' && !baseName.includes('gemini_quota_cache') && !baseName.includes('token_tracker_cache')) {
-                    return;
-                  }
-                }
-                notifyChange(`${label}:${filename || eventType}`);
-              });
+              const w2 = fs.watch(targetPath, { recursive: false }, handleEvent);
               w2._agyTarget = targetPath;
               w2.on('error', () => {
                 const idx = watchers.indexOf(w2);
@@ -327,8 +377,7 @@ function startDashboardServer(opts = {}) {
       attachWatcher(targetBrainDir, true, 'brain');
 
       // 2. Watch brain parent directory (ANTIGRAVITY_DIR for history.jsonl updates)
-      const brainParent = path.dirname(targetBrainDir);
-      if (brainParent && brainParent !== targetBrainDir) {
+      if (brainParent && brainParent !== targetBrainDir && brainParent !== quotaDir) {
         attachWatcher(brainParent, false, 'antigravity-dir');
       }
 
@@ -337,11 +386,16 @@ function startDashboardServer(opts = {}) {
         attachWatcher(quotaDir, false, 'gemini-dir');
       }
 
-      // 4. Watch individual cache files directly if present
-      if (fs.existsSync(targetQuotaCacheFile)) {
+      // 4. Watch token cache directory if distinct from quotaDir and brainParent
+      if (tokenCacheDir && tokenCacheDir !== quotaDir && tokenCacheDir !== brainParent) {
+        attachWatcher(tokenCacheDir, false, 'gemini-dir');
+      }
+
+      // 5. Watch individual cache files directly if present (and not in watched quotaDir)
+      if (fs.existsSync(targetQuotaCacheFile) && path.dirname(targetQuotaCacheFile) !== quotaDir) {
         attachWatcher(targetQuotaCacheFile, false, 'quota-cache');
       }
-      if (fs.existsSync(targetCacheFile)) {
+      if (fs.existsSync(targetCacheFile) && path.dirname(targetCacheFile) !== quotaDir && path.dirname(targetCacheFile) !== tokenCacheDir) {
         attachWatcher(targetCacheFile, false, 'token-cache');
       }
 
@@ -586,8 +640,8 @@ function startDashboardServer(opts = {}) {
             if (periodicTimer) clearInterval(periodicTimer);
             if (debounceTimer) clearTimeout(debounceTimer);
             if (watchdog) clearInterval(watchdog);
-            for (const t of reattachTimers) clearTimeout(t);
-            reattachTimers.clear();
+            for (const t of pendingReattachTimers.values()) clearTimeout(t);
+            pendingReattachTimers.clear();
             for (const w of watchers) {
               try { w.close(); } catch (_e) {}
             }
