@@ -5578,6 +5578,7 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
       let req2 = null;
 
       const connectClient = (eventsArr) => new Promise((resolve) => {
+        let resolved = false;
         const req = http.get(`${info.url.replace(/\/$/, '')}/events`, (res) => {
           let buffer = '';
           res.on('data', (chunk) => {
@@ -5590,7 +5591,10 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
                 if (dataLine) {
                   try {
                     eventsArr.push(JSON.parse(dataLine.slice(5).trim()));
-                    resolve();
+                    if (!resolved) {
+                      resolved = true;
+                      resolve(req);
+                    }
                   } catch (_e) {}
                 }
               }
@@ -5598,11 +5602,10 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
           });
         });
         req.on('error', () => {});
-        return req;
       });
 
-      req1 = await new Promise(async (r) => { const req = await connectClient(client1Events); r(req); });
-      req2 = await new Promise(async (r) => { const req = await connectClient(client2Events); r(req); });
+      req1 = await connectClient(client1Events);
+      req2 = await connectClient(client2Events);
 
       assert(client1Events.length >= 1);
       assert(client2Events.length >= 1);

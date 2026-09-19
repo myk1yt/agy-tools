@@ -156,9 +156,19 @@ function startDashboardServer(opts = {}) {
       let lastActivityAt = Date.now();
       const sseClients = new Set();
       const watchers = [];
+      const reattachTimers = new Set();
       let debounceTimer = null;
       let periodicTimer = null;
       let watchdog = null;
+
+      const quotaDir = path.dirname(targetQuotaCacheFile);
+
+      const CORS_HEADERS = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Allow-Private-Network': 'true'
+      };
 
       /**
        * Broadcasts payload to all connected SSE clients.
@@ -167,9 +177,14 @@ function startDashboardServer(opts = {}) {
        */
       function broadcastSSE(payload) {
         if (!payload || typeof payload !== 'object' || terminated) return;
+        const isFull = typeof payload.version === 'number';
+        if (isFull) latestPayload = payload;
         const dataStr = JSON.stringify(payload);
         const messageChunk = `data: ${dataStr}\n\n`;
-        const updateChunk = `event: update\ndata: ${JSON.stringify({ type: 'update', timestamp: Date.now() })}\n\n`;
+        const updatePayload = isFull
+          ? { type: 'update', timestamp: Date.now(), ...payload }
+          : { type: 'update', timestamp: Date.now(), ...payload };
+        const updateChunk = `event: update\ndata: ${JSON.stringify(updatePayload)}\n\n`;
 
         for (const client of sseClients) {
           try {
@@ -199,11 +214,25 @@ function startDashboardServer(opts = {}) {
             return;
           }
           try {
+            // Check for late-created cache or brain files to ensure watchers are active
+            if (fs.existsSync(targetQuotaCacheFile) && !watchers.some(w => w._agyTarget === targetQuotaCacheFile)) {
+              attachWatcher(targetQuotaCacheFile, false, 'quota-cache');
+            }
+            if (fs.existsSync(targetCacheFile) && !watchers.some(w => w._agyTarget === targetCacheFile)) {
+              attachWatcher(targetCacheFile, false, 'token-cache');
+            }
+            if (fs.existsSync(targetBrainDir) && !watchers.some(w => w._agyTarget === targetBrainDir)) {
+              attachWatcher(targetBrainDir, true, 'brain');
+            }
+            if (quotaDir && fs.existsSync(quotaDir) && !watchers.some(w => w._agyTarget === quotaDir)) {
+              attachWatcher(quotaDir, false, 'gemini-dir');
+            }
+
             const payload = await aggregate();
             latestPayload = payload;
             try {
               writeDashboardFiles(payload, {
-                force: true,
+                force: false,
                 refreshSec: opts.refreshSec,
                 servePort: boundPortRef || port
               });
@@ -224,18 +253,68 @@ function startDashboardServer(opts = {}) {
         if (!targetPath || !fs.existsSync(targetPath)) return null;
         try {
           const w = fs.watch(targetPath, { recursive }, (eventType, filename) => {
+            const fname = filename ? String(filename) : '';
+            if (fname) {
+              const baseName = path.basename(fname);
+              if (baseName.startsWith('.') || baseName.endsWith('.tmp') || baseName.includes('dashboard')) {
+                return;
+              }
+              if (label === 'gemini-dir' && !baseName.includes('gemini_quota_cache') && !baseName.includes('token_tracker_cache')) {
+                return;
+              }
+            }
             notifyChange(`${label}:${filename || eventType}`);
+            // Re-attach watcher if file underwent atomic replacement (rename)
+            if (!recursive && eventType === 'rename' && fs.existsSync(targetPath)) {
+              const timer = setTimeout(() => {
+                reattachTimers.delete(timer);
+                if (terminated) return;
+                try {
+                  const idx = watchers.indexOf(w);
+                  if (idx !== -1) watchers.splice(idx, 1);
+                  try { w.close(); } catch (_e) {}
+                  attachWatcher(targetPath, false, label);
+                } catch (_reErr) {}
+              }, 50);
+              reattachTimers.add(timer);
+            }
           });
-          w.on('error', () => {});
+          w._agyTarget = targetPath;
+          w.on('error', () => {
+            const idx = watchers.indexOf(w);
+            if (idx !== -1) watchers.splice(idx, 1);
+          });
+          w.on('close', () => {
+            const idx = watchers.indexOf(w);
+            if (idx !== -1) watchers.splice(idx, 1);
+          });
           watchers.push(w);
           return w;
         } catch (_err) {
           if (recursive) {
             try {
               const w2 = fs.watch(targetPath, { recursive: false }, (eventType, filename) => {
+                const fname = filename ? String(filename) : '';
+                if (fname) {
+                  const baseName = path.basename(fname);
+                  if (baseName.startsWith('.') || baseName.endsWith('.tmp') || baseName.includes('dashboard')) {
+                    return;
+                  }
+                  if (label === 'gemini-dir' && !baseName.includes('gemini_quota_cache') && !baseName.includes('token_tracker_cache')) {
+                    return;
+                  }
+                }
                 notifyChange(`${label}:${filename || eventType}`);
               });
-              w2.on('error', () => {});
+              w2._agyTarget = targetPath;
+              w2.on('error', () => {
+                const idx = watchers.indexOf(w2);
+                if (idx !== -1) watchers.splice(idx, 1);
+              });
+              w2.on('close', () => {
+                const idx = watchers.indexOf(w2);
+                if (idx !== -1) watchers.splice(idx, 1);
+              });
               watchers.push(w2);
               return w2;
             } catch (_e2) {}
@@ -254,7 +333,6 @@ function startDashboardServer(opts = {}) {
       }
 
       // 3. Watch quota directory (GEMINI_DIR for gemini_quota_cache.json & token_tracker_cache.json)
-      const quotaDir = path.dirname(targetQuotaCacheFile);
       if (quotaDir) {
         attachWatcher(quotaDir, false, 'gemini-dir');
       }
@@ -270,13 +348,13 @@ function startDashboardServer(opts = {}) {
       const server = http.createServer(async (req, res) => {
         lastActivityAt = Date.now();
         // CORS for file:// pages (origin null) — E10; localhost-only server (C6)
-        res.setHeader('Access-Control-Allow-Origin', '*');
+        for (const [k, v] of Object.entries(CORS_HEADERS)) {
+          res.setHeader(k, v);
+        }
 
         if (req.method === 'OPTIONS') {
           res.writeHead(204, {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, OPTIONS',
-            'Access-Control-Allow-Headers': '*',
+            ...CORS_HEADERS,
             'Cache-Control': 'no-store'
           });
           res.end();
@@ -287,7 +365,7 @@ function startDashboardServer(opts = {}) {
 
         if (urlPath === '/' || urlPath === '/index.html') {
           try {
-            const payload = latestPayload || (await aggregate());
+            const payload = await aggregate();
             latestPayload = payload;
             const html = renderDashboardHtml(payload, {
               refreshSec: opts.refreshSec,
@@ -301,6 +379,7 @@ function startDashboardServer(opts = {}) {
               });
             } catch (_wErr) {}
             res.writeHead(200, {
+              ...CORS_HEADERS,
               'Content-Type': 'text/html; charset=utf-8',
               'Cache-Control': 'no-store'
             });
@@ -310,6 +389,7 @@ function startDashboardServer(opts = {}) {
               if (fs.existsSync(DASHBOARD_HTML_FILE)) {
                 const fallbackHtml = fs.readFileSync(DASHBOARD_HTML_FILE, 'utf8');
                 res.writeHead(200, {
+                  ...CORS_HEADERS,
                   'Content-Type': 'text/html; charset=utf-8',
                   'Cache-Control': 'no-store'
                 });
@@ -317,7 +397,7 @@ function startDashboardServer(opts = {}) {
                 return;
               }
             } catch (_fErr) {}
-            res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.writeHead(404, { ...CORS_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' });
             res.end('dashboard.html not found. Run: agy-tokens --html');
           }
           return;
@@ -327,6 +407,7 @@ function startDashboardServer(opts = {}) {
           sseClients.add(res);
           lastActivityAt = Date.now();
           res.writeHead(200, {
+            ...CORS_HEADERS,
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-store',
             'Connection': 'keep-alive'
@@ -344,13 +425,13 @@ function startDashboardServer(opts = {}) {
           // Push immediate initial payload to newly connected client
           if (latestPayload) {
             res.write(`data: ${JSON.stringify(latestPayload)}\n\n`);
-            res.write(`event: update\ndata: ${JSON.stringify({ type: 'update', timestamp: Date.now() })}\n\n`);
+            res.write(`event: update\ndata: ${JSON.stringify({ type: 'update', timestamp: Date.now(), ...latestPayload })}\n\n`);
           } else {
             aggregate().then((p) => {
               latestPayload = p;
               if (sseClients.has(res) && !terminated) {
                 res.write(`data: ${JSON.stringify(p)}\n\n`);
-                res.write(`event: update\ndata: ${JSON.stringify({ type: 'update', timestamp: Date.now() })}\n\n`);
+                res.write(`event: update\ndata: ${JSON.stringify({ type: 'update', timestamp: Date.now(), ...p })}\n\n`);
               }
             }).catch(() => {});
           }
@@ -364,9 +445,10 @@ function startDashboardServer(opts = {}) {
 
         if (urlPath === '/data.json') {
           try {
-            const payload = latestPayload || (await aggregate());
+            const payload = await aggregate();
             latestPayload = payload;
             res.writeHead(200, {
+              ...CORS_HEADERS,
               'Content-Type': 'application/json; charset=utf-8',
               'Cache-Control': 'no-store'
             });
@@ -376,6 +458,7 @@ function startDashboardServer(opts = {}) {
               if (fs.existsSync(DASHBOARD_DATA_JSON)) {
                 const json = fs.readFileSync(DASHBOARD_DATA_JSON, 'utf8');
                 res.writeHead(200, {
+                  ...CORS_HEADERS,
                   'Content-Type': 'application/json; charset=utf-8',
                   'Cache-Control': 'no-store'
                 });
@@ -383,7 +466,7 @@ function startDashboardServer(opts = {}) {
                 return;
               }
             } catch (_fErr) {}
-            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.writeHead(500, { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' });
             res.end('{}');
           }
           return;
@@ -391,9 +474,10 @@ function startDashboardServer(opts = {}) {
 
         if (urlPath === '/dashboard-data.js') {
           try {
-            const payload = latestPayload || (await aggregate());
+            const payload = await aggregate();
             latestPayload = payload;
             res.writeHead(200, {
+              ...CORS_HEADERS,
               'Content-Type': 'text/javascript; charset=utf-8',
               'Cache-Control': 'no-store'
             });
@@ -403,6 +487,7 @@ function startDashboardServer(opts = {}) {
               if (fs.existsSync(DASHBOARD_DATA_JS)) {
                 const dataJs = fs.readFileSync(DASHBOARD_DATA_JS, 'utf8');
                 res.writeHead(200, {
+                  ...CORS_HEADERS,
                   'Content-Type': 'text/javascript; charset=utf-8',
                   'Cache-Control': 'no-store'
                 });
@@ -410,13 +495,13 @@ function startDashboardServer(opts = {}) {
                 return;
               }
             } catch (_fErr) {}
-            res.writeHead(500, { 'Content-Type': 'text/javascript; charset=utf-8' });
+            res.writeHead(500, { ...CORS_HEADERS, 'Content-Type': 'text/javascript; charset=utf-8' });
             res.end('window.__AGY_DASH__ = {};\n');
           }
           return;
         }
 
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.writeHead(404, { ...CORS_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('Not Found');
       });
 
@@ -497,15 +582,22 @@ function startDashboardServer(opts = {}) {
           aggregate,
           notifyChange,
           cleanup: () => {
+            terminated = true;
             if (periodicTimer) clearInterval(periodicTimer);
             if (debounceTimer) clearTimeout(debounceTimer);
             if (watchdog) clearInterval(watchdog);
+            for (const t of reattachTimers) clearTimeout(t);
+            reattachTimers.clear();
             for (const w of watchers) {
               try { w.close(); } catch (_e) {}
             }
             watchers.length = 0;
             for (const client of sseClients) {
-              try { client.end(); } catch (_e) {}
+              try {
+                client.end();
+                if (typeof client.destroy === 'function') client.destroy();
+                if (client.socket && typeof client.socket.destroy === 'function') client.socket.destroy();
+              } catch (_e) {}
             }
             sseClients.clear();
           }
@@ -543,13 +635,36 @@ function stopDashboardServer(server) {
       resolve();
       return;
     }
+    let resolved = false;
+    const finish = () => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    };
+    const timer = setTimeout(() => {
+      if (typeof server.closeAllConnections === 'function') {
+        try { server.closeAllConnections(); } catch (_e) {}
+      }
+      finish();
+    }, 1000);
+    if (typeof timer.unref === 'function') timer.unref();
+
     if (server._agyDashboardState && typeof server._agyDashboardState.cleanup === 'function') {
       try { server._agyDashboardState.cleanup(); } catch (_e) {}
     }
     if (typeof server.closeAllConnections === 'function') {
       try { server.closeAllConnections(); } catch (_e) {}
     }
-    server.close(() => resolve());
+    try {
+      server.close(() => {
+        clearTimeout(timer);
+        finish();
+      });
+    } catch (_e) {
+      clearTimeout(timer);
+      finish();
+    }
   });
 }
 
