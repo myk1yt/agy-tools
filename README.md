@@ -77,11 +77,13 @@ flowchart TD
     Core["main\nCore Engine & Token Monitor"]
     Des["Agent/designer\n@designer Plugin"]
     Sec["Agent/security-reviewer\n@security-reviewer Suite"]
+    CodeRev["Agent/code-reviewer\n@code-reviewer Suite"]
     Gov["gemini-config\nAutonomous Governance Rules"]
     Dash["dashboard\nHistorical Prototype"]
     
     Core -->|Plugin| Des
     Core -->|Plugin| Sec
+    Core -->|Plugin| CodeRev
     Core -->|Global Config| Gov
     Dash -->|Merged & Superseded| Core
 ```
@@ -91,6 +93,7 @@ flowchart TD
 | [`main`](https://github.com/myk1yt/agy-tools/tree/main) | **Core Engine & Developer Toolkit** | Statusline badge, SSE Web Dashboard, 1:1 Gemini Quota Pool RPC, Dynamic Pricing, 21 languages | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` | `cmd /c "git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"` | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh` |
 | [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) | **Zero-MCP Design Specialist** | `@designer` agent, 5 modular add-on modules (SVG, 3D Canvas, Cyberpunk, Sandbox, QA Harness) | `git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1` | `cmd /c "git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1"` | `git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-designer.sh` |
 | [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) | **Enterprise Multi-Agent Security Audit** | `@security-reviewer` orchestrator + 4 domain inspectors (OWASP, IAM, Credentials, Supply Chain) | `git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-security-reviewer.ps1` | `cmd /c "git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-security-reviewer.ps1"` | `git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-security-reviewer.sh` |
+| [`Agent/code-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/code-reviewer) | **Pre-Merge Code Review & Quality Gate** | `@code-reviewer` agent, 4-stage pipeline, 8-category taxonomy, zero-tolerance P0-P3 gate | `git clone -b Agent/code-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-code-reviewer.ps1` | `cmd /c "git clone -b Agent/code-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-code-reviewer.ps1"` | `git clone -b Agent/code-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-code-reviewer.sh` |
 | [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config) | **Autonomous Multi-Agent Governance** | 7-Stage Lifecycle Protocol, Master Zero-Source-Edit Invariant, orchestrator governance | `git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` | `cmd /c "git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"` | `git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh` |
 | [`dashboard`](https://github.com/myk1yt/agy-tools/tree/dashboard) | **Historical Prototype** | Original token tracker foundation (fully merged into `main`) | — | — | — |
 
@@ -153,6 +156,9 @@ This repository keeps each add-on in a **separate git branch** (like a separate 
    - **Security Reviewer**: In the Antigravity chat input type `@security-reviewer` plus the code/folder you want audited, for example:
      - `@security-reviewer audit this repository for hard-coded API keys and OWASP issues`
      - `@security-reviewer check the IAM roles in deploy/terraform/ for least privilege violations`
+   - **Code Reviewer**: In the Antigravity chat input type `@code-reviewer` plus the diff or PR you want audited, for example:
+     - `@code-reviewer review all uncommitted changes against main before I create a PR`
+     - `@code-reviewer perform a pre-merge audit on HEAD~3..HEAD with focus on data-integrity and security`
    - **gemini-config**: Nothing to type — after installing, Antigravity automatically loads the governance rules and orchestrator governance modules; the statusline badge (via the `statusLine` in settings.json) shows live token analytics every turn.
 
 5. **Uninstall (when you no longer want it)**
@@ -162,6 +168,8 @@ This repository keeps each add-on in a **separate git branch** (like a separate 
    powershell -ExecutionPolicy Bypass -File scripts/uninstall-designer.ps1
    # Security Reviewer
    powershell -ExecutionPolicy Bypass -File scripts/uninstall-security-reviewer.ps1
+   # Code Reviewer
+   powershell -ExecutionPolicy Bypass -File scripts/uninstall-code-reviewer.ps1
    # gemini-config
    scripts\uninstall.bat
    ```
@@ -259,6 +267,39 @@ bash scripts/install-security-reviewer.sh                                       
 ```
 
 Invoke in Antigravity CLI: `/agent` → select `security-reviewer`, or mention `@security-reviewer` directly.
+
+### `@code-reviewer` — Pre-Merge Diff Reviewer & Deterministic Quality Gate
+
+> **Branch**: [`Agent/code-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/code-reviewer) · **Author**: myk1yt · **Version**: 1.0.0
+
+Autonomous pre-merge diff reviewer and deterministic quality gate plugin for Google Antigravity. Built with a strict **read-only hardware constraint** (excluding all file write/edit tools), Code Reviewer audits pull requests and uncommitted working diffs through a robust 4-stage pipeline, catching bugs, security risks, stability flaws, and formatting issues before code merges into production.
+
+**2 Bundled Modular Capabilities:**
+
+| Capability | Description |
+|---|---|
+| `code-review-taxonomy` | 8-category taxonomy scan (correctness, security, stability, data-integrity, performance, maintainability, test-coverage, style-docs) with P0-P3 severity and 0-100 confidence scoring |
+| `quality-gate` | Universal deterministic quality gate running linter, typecheck, format check, and static security scans across changed files |
+
+**Installation & Usage:**
+```bash
+# Fresh machine — one shot (macOS / Linux terminal; checkout happens inside the clone):
+git clone -b Agent/code-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-code-reviewer.sh
+```
+
+```powershell
+# Fresh machine — one shot (Windows, paste into PowerShell or Command Prompt):
+cmd /c "git clone -b Agent/code-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-code-reviewer.ps1"
+```
+
+```bash
+# Already cloned earlier? Switch rooms, then install:
+git checkout Agent/code-reviewer
+powershell -ExecutionPolicy Bypass -File scripts/install-code-reviewer.ps1   # Windows
+bash scripts/install-code-reviewer.sh                                        # Linux / macOS
+```
+
+Invoke in Antigravity CLI: `/agent` → select `code-reviewer`, or mention `@code-reviewer` directly.
 
 ---
 
