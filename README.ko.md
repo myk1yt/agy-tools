@@ -77,11 +77,13 @@ flowchart TD
     Core["main\n코어 엔진 & 토큰 모니터"]
     Des["Agent/designer\n@designer 플러그인"]
     Sec["Agent/security-reviewer\n@security-reviewer 스위트"]
+    CodeRev["Agent/code-reviewer\n@code-reviewer 스위트"]
     Gov["gemini-config\n자율 거버넌스 규칙"]
     Dash["dashboard\n히스토리컬 프로토타입"]
     
     Core -->|플러그인| Des
     Core -->|플러그인| Sec
+    Core -->|플러그인| CodeRev
     Core -->|글로벌 설정| Gov
     Dash -->|병합 및 대체| Core
 ```
@@ -91,6 +93,7 @@ flowchart TD
 | [`main`](https://github.com/myk1yt/agy-tools/tree/main) | **코어 엔진 & 개발자 툴킷** | 상태줄 배지, SSE 웹 대시보드, 1:1 Gemini 쿼터 풀 RPC, 동적 단가 계산, 21개 언어 | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` | `cmd /c "git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"` | `git clone https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh` |
 | [`Agent/designer`](https://github.com/myk1yt/agy-tools/tree/Agent/designer) | **Zero-MCP 디자인 전문가** | `@designer` 에이전트, 5개 모듈형 스킬 (SVG, 3D 캔버스, 사이버펑크, 샌드박스, QA 하네스) | `git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1` | `cmd /c "git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-designer.ps1"` | `git clone -b Agent/designer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-designer.sh` |
 | [`Agent/security-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/security-reviewer) | **엔터프라이즈 멀티 에이전트 보안 감사** | `@security-reviewer` 오케스트레이터 + 4개 도메인 인스펙터 (OWASP, IAM, 자격 증명, 공급망) | `git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-security-reviewer.ps1` | `cmd /c "git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-security-reviewer.ps1"` | `git clone -b Agent/security-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-security-reviewer.sh` |
+| [`Agent/code-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/code-reviewer) | **Pre-Merge 코드 리뷰 & 퀄리티 게이트** | `@code-reviewer` 에이전트, 4단계 파이프라인, 8개 텍사노미, P0-P3 무관용 판정 게이트 | `git clone -b Agent/code-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-code-reviewer.ps1` | `cmd /c "git clone -b Agent/code-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-code-reviewer.ps1"` | `git clone -b Agent/code-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-code-reviewer.sh` |
 | [`gemini-config`](https://github.com/myk1yt/agy-tools/tree/gemini-config) | **자율 멀티 에이전트 거버넌스** | 7단계 라이프사이클 프로토콜, Master Zero-Source-Edit 불변성, 오케스트레이터 스킬 | `git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat` | `cmd /c "git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && scripts\install.bat"` | `git clone -b gemini-config https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install.sh` |
 | [`dashboard`](https://github.com/myk1yt/agy-tools/tree/dashboard) | **히스토리컬 프로토타입** | 최초 토큰 추적기 기반 (현재 `main`에 완전 병합됨) | — | — | — |
 
@@ -194,6 +197,41 @@ bash scripts/install-security-reviewer.sh                                       
 ```
 
 Antigravity CLI에서 호출: `/agent` → `security-reviewer` 선택, 또는 `@security-reviewer`를 직접 호출하세요.
+
+---
+
+### `@code-reviewer` — Pre-Merge 코드 리뷰 & 퀄리티 게이트
+
+> **브랜치**: [`Agent/code-reviewer`](https://github.com/myk1yt/agy-tools/tree/Agent/code-reviewer) · **작성자**: myk1yt · **버전**: 1.0.0
+
+Google Antigravity CLI를 위한 자율 사전 병합(Pre-Merge) diff 리뷰어 및 결정론적 퀄리티 게이트 플러그인입니다. 엄격한 **하드웨어 읽기 전용 제약조건**(코드 쓰기/수정 도구 완전 배제)으로 설계되어, PR이나 작업 중인 변경 사항(diff)을 4단계 파이프라인으로 정밀 감사하고, 버그, 보안 취약점, 안정성 결함, 포맷 문제를 프로덕션 병합 전에 원천 차단합니다.
+
+**2개 번들 모듈형 스킬:**
+
+| 스킬 | 설명 |
+|---|---|
+| `code-review-taxonomy` | 8대 분류 체계(정확성, 보안, 안정성, 데이터 정합성, 성능, 유지보수성, 테스트 커버리지, 스타일/문서) 스캔 및 P0-P3 심각도/0-100 신뢰도 채점 |
+| `quality-gate` | 변경된 파일 대상 린터, 타입체크, 포맷팅, 정적 보안 스캐너를 실행하는 범용 결정론적 퀄리티 게이트 |
+
+**설치 및 사용법:**
+```bash
+# 새 컴퓨터 — 원큐 설치 (macOS / Linux 터미널; 클론 중에 브랜치 전환이 자동으로 됨):
+git clone -b Agent/code-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && bash scripts/install-code-reviewer.sh
+```
+
+```powershell
+# 새 컴퓨터 — 원큐 설치 (Windows, PowerShell 또는 명령 프롬프트에 붙여넣기):
+cmd /c "git clone -b Agent/code-reviewer https://github.com/myk1yt/agy-tools.git && cd agy-tools && powershell -ExecutionPolicy Bypass -File scripts\install-code-reviewer.ps1"
+```
+
+```bash
+# 이미 클론한 적이 있는 경우? 브랜치로 전환한 뒤 설치:
+git checkout Agent/code-reviewer
+powershell -ExecutionPolicy Bypass -File scripts/install-code-reviewer.ps1   # Windows
+bash scripts/install-code-reviewer.sh                                        # Linux / macOS
+```
+
+Antigravity CLI에서 호출: `/agent` → `code-reviewer` 선택, 또는 `@code-reviewer`를 직접 호출하세요.
 
 ---
 
