@@ -90,8 +90,12 @@ function saveCache(cacheData, customCachePath = CACHE_FILE) {
     }
 
     if (!renamed) {
+      try {
+        fs.copyFileSync(tempFile, customCachePath);
+      } catch (_copyErr) {
+        fs.writeFileSync(customCachePath, content, 'utf8');
+      }
       try { fs.unlinkSync(tempFile); } catch (_e) {}
-      fs.writeFileSync(customCachePath, content, 'utf8');
     }
 
     lastValidCache = JSON.parse(JSON.stringify(cacheData));
@@ -184,8 +188,20 @@ async function syncSessions(options = {}) {
     saveCache(cache, cachePath);
   }
 
+  const getSessionActivityTime = (s) => {
+    if (!s) return 0;
+    const lastTurnTime = s.turns && s.turns.length > 0
+      ? new Date(s.turns[s.turns.length - 1].createdAt || 0).getTime()
+      : 0;
+    const endTime = s.endTime ? new Date(s.endTime).getTime() : 0;
+    const startTime = s.startTime ? new Date(s.startTime).getTime() : 0;
+    const logicalTime = Math.max(lastTurnTime, endTime, startTime);
+    if (logicalTime > 0) return logicalTime;
+    return s.mtimeMs || 0;
+  };
+
   const sessionList = Object.values(updatedSessionsMap).sort(
-    (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
+    (a, b) => getSessionActivityTime(b) - getSessionActivityTime(a)
   );
 
   const elapsedMs = Date.now() - startTime;

@@ -185,7 +185,8 @@ function findTranscriptPath(sessionDirPath) {
     path.join(sessionDirPath, '.system_generated', 'logs', 'transcript.jsonl'),
     path.join(sessionDirPath, 'logs', 'transcript.jsonl'),
     path.join(sessionDirPath, 'transcript.jsonl'),
-    path.join(sessionDirPath, '.system_generated', 'logs', 'transcript_full.jsonl')
+    path.join(sessionDirPath, '.system_generated', 'logs', 'transcript_full.jsonl'),
+    path.join(sessionDirPath, 'session.jsonl')
   ];
 
   for (const p of possiblePaths) {
@@ -445,34 +446,58 @@ async function parseTranscriptFile(transcriptPath, sessionId, metadata = {}, mod
  */
 function discoverSessions(customBrainDir = BRAIN_DIR) {
   const sessions = [];
-  if (!fs.existsSync(customBrainDir)) {
+  const primaryDir = customBrainDir || BRAIN_DIR;
+  const dirsToScan = [];
+
+  if (primaryDir && fs.existsSync(primaryDir)) {
+    dirsToScan.push(primaryDir);
+  }
+
+  const parentDir = path.dirname(primaryDir);
+  const baseName = path.basename(primaryDir);
+  const siblingName = baseName === 'brain' ? 'sessions' : (baseName === 'sessions' ? 'brain' : null);
+  if (siblingName) {
+    const altDir = path.join(parentDir, siblingName);
+    if (altDir !== primaryDir && fs.existsSync(altDir) && !dirsToScan.includes(altDir)) {
+      dirsToScan.push(altDir);
+    }
+  }
+
+  if (dirsToScan.length === 0) {
     return sessions;
   }
 
-  let entries = [];
-  try {
-    entries = fs.readdirSync(customBrainDir, { withFileTypes: true });
-  } catch (_err) {
-    return sessions;
-  }
+  const seenSessionIds = new Set();
 
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      const sessionId = entry.name;
-      const sessionDir = path.join(customBrainDir, sessionId);
-      const transcriptPath = findTranscriptPath(sessionDir);
+  for (const scanDir of dirsToScan) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(scanDir, { withFileTypes: true });
+    } catch (_err) {
+      continue;
+    }
 
-      if (transcriptPath) {
-        try {
-          const stat = fs.statSync(transcriptPath);
-          sessions.push({
-            sessionId,
-            dirPath: sessionDir,
-            transcriptPath,
-            mtimeMs: stat.mtimeMs,
-            size: stat.size
-          });
-        } catch (_e) {}
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const sessionId = entry.name;
+        if (seenSessionIds.has(sessionId)) continue;
+
+        const sessionDir = path.join(scanDir, sessionId);
+        const transcriptPath = findTranscriptPath(sessionDir);
+
+        if (transcriptPath) {
+          try {
+            const stat = fs.statSync(transcriptPath);
+            seenSessionIds.add(sessionId);
+            sessions.push({
+              sessionId,
+              dirPath: sessionDir,
+              transcriptPath,
+              mtimeMs: stat.mtimeMs,
+              size: stat.size
+            });
+          } catch (_e) {}
+        }
       }
     }
   }

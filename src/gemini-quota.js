@@ -337,6 +337,41 @@ function parseCommandLine(cmdLine) {
 }
 
 /**
+ * Resolves language server endpoint and CSRF token from environment variables if present.
+ * Priority: ANTIGRAVITY_LS_ADDRESS (e.g. localhost:63768) or ANTIGRAVITY_LS_PORT,
+ * ANTIGRAVITY_CSRF_TOKEN or CSRF_TOKEN, ANTIGRAVITY_LS_PROTOCOL.
+ * @returns {{ pid: number, port: number, ports: Array<number>, csrfToken: string, protocol: 'http'|'https'|null }|null}
+ */
+function getEnvLanguageServerTarget() {
+  let envPort = null;
+  if (process.env.ANTIGRAVITY_LS_ADDRESS && typeof process.env.ANTIGRAVITY_LS_ADDRESS === 'string') {
+    const addrMatch = process.env.ANTIGRAVITY_LS_ADDRESS.match(/:(\d+)$/);
+    if (addrMatch && addrMatch[1]) {
+      envPort = parseInt(addrMatch[1], 10);
+    }
+  }
+  if (!envPort && process.env.ANTIGRAVITY_LS_PORT) {
+    const p = parseInt(process.env.ANTIGRAVITY_LS_PORT, 10);
+    if (!isNaN(p)) envPort = p;
+  }
+  if (envPort) {
+    const csrfToken = (process.env.ANTIGRAVITY_CSRF_TOKEN || process.env.CSRF_TOKEN || '').trim();
+    let protocol = null;
+    if (process.env.ANTIGRAVITY_LS_PROTOCOL) {
+      protocol = process.env.ANTIGRAVITY_LS_PROTOCOL.toLowerCase();
+    }
+    return {
+      pid: process.pid,
+      port: envPort,
+      ports: [envPort],
+      csrfToken,
+      protocol
+    };
+  }
+  return null;
+}
+
+/**
  * Parses Windows netstat output to find all local listening ports for a given PID.
  * @param {string} netstatOutput
  * @param {number|string} pid
@@ -441,6 +476,8 @@ async function discoverLanguageServer(opts = {}) {
       const encoded = Buffer.from(script, 'utf16le').toString('base64');
       exec(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`, { timeout: timeoutMs, windowsHide: true }, (err, stdout) => {
         if (err || !stdout || !stdout.trim()) {
+          const envFallback = getEnvLanguageServerTarget();
+          if (envFallback) return finish(envFallback);
           return finish(null);
         }
         try {
@@ -489,6 +526,16 @@ async function discoverLanguageServer(opts = {}) {
             }
           }
           if (primary) {
+            const envTarget = getEnvLanguageServerTarget();
+            if (envTarget) {
+              const envPort = envTarget.port;
+              const idx = allCandidatePorts.indexOf(envPort);
+              if (idx > -1) allCandidatePorts.splice(idx, 1);
+              allCandidatePorts.unshift(envPort);
+              primary.port = envPort;
+              if (!primary.csrfToken && envTarget.csrfToken) primary.csrfToken = envTarget.csrfToken;
+              if (!primary.protocol && envTarget.protocol) primary.protocol = envTarget.protocol;
+            }
             primary.ports = allCandidatePorts.length > 0 ? allCandidatePorts : primary.ports;
             primary.pids = allCandidatePids.length > 0 ? allCandidatePids : [primary.pid];
             return finish(primary);
@@ -496,12 +543,18 @@ async function discoverLanguageServer(opts = {}) {
         } catch (_pe) {
           // Ignore JSON parse error
         }
+        const envFallback = getEnvLanguageServerTarget();
+        if (envFallback) return finish(envFallback);
         finish(null);
       });
     } else {
       // POSIX Discovery: ps -ax -o pid,command, evaluated newest-first (reverse order)
       exec(`ps -ax -o pid,command`, { timeout: timeoutMs, windowsHide: true }, (err, stdout) => {
-        if (err || !stdout) return finish(null);
+        if (err || !stdout) {
+          const envFallback = getEnvLanguageServerTarget();
+          if (envFallback) return finish(envFallback);
+          return finish(null);
+        }
         const lines = stdout.split('\n');
         const candidates = lines.slice().reverse();
         let primary = null;
@@ -549,10 +602,22 @@ async function discoverLanguageServer(opts = {}) {
           }
         }
         if (primary) {
+          const envTarget = getEnvLanguageServerTarget();
+          if (envTarget) {
+            const envPort = envTarget.port;
+            const idx = allCandidatePorts.indexOf(envPort);
+            if (idx > -1) allCandidatePorts.splice(idx, 1);
+            allCandidatePorts.unshift(envPort);
+            primary.port = envPort;
+            if (!primary.csrfToken && envTarget.csrfToken) primary.csrfToken = envTarget.csrfToken;
+            if (!primary.protocol && envTarget.protocol) primary.protocol = envTarget.protocol;
+          }
           primary.ports = allCandidatePorts.length > 0 ? allCandidatePorts : primary.ports;
           primary.pids = allCandidatePids.length > 0 ? allCandidatePids : [primary.pid];
           return finish(primary);
         }
+        const envFallback = getEnvLanguageServerTarget();
+        if (envFallback) return finish(envFallback);
         finish(null);
       });
     }
@@ -1280,7 +1345,7 @@ function triggerBackgroundQuotaRefresh(opts = {}) {
   _lastBackgroundTriggerAt = now;
 
   try {
-    const script = `require('${__filename.replace(/\\/g, '/')}').fetchLiveGeminiQuota().catch(()=>{})`;
+    const script = `require('${__filename.replace(/\\/g, '/')}').fetchLiveGeminiQuota({ forceRefresh: true }).catch(()=>{})`;
     const child = spawn(process.execPath, ['-e', script], {
       detached: true,
       stdio: 'ignore',
@@ -1696,6 +1761,7 @@ module.exports = {
   formatCountdownDuration,
   formatResetTime,
   parseCommandLine,
+  getEnvLanguageServerTarget,
   extractPortsFromNetstat,
   extractPortFromNetstat,
   extractPortFromLsof,

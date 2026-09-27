@@ -57,6 +57,11 @@ echo "[INFO] Configuring Antigravity statusLine integration..."
 node "$ROOT_DIR/scripts/lib/configure-statusline.js" --command "$STATUSLINE_CMD"
 
 echo ""
+echo "[INFO] Configuring Antigravity agent rules and protocols..."
+node "$ROOT_DIR/scripts/lib/configure-rules.js"
+
+
+echo ""
 echo "[INFO] Statusline integration:"
 echo "  Target settings: $HOME/.gemini/antigravity-cli/settings.json"
 echo '  "statusLine": {'

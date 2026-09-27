@@ -10,6 +10,7 @@ const os = require('os');
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+const vm = require('vm');
 const assert = require('assert');
 
 const config = require('../src/config');
@@ -2301,7 +2302,7 @@ async function runAllTests() {
         }
       ];
 
-      const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en' });
+      const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en', refDate: d2 });
 
       // 1. payload.models has 2 distinct entries keyed by model name
       assert(Array.isArray(payload.models) && payload.models.length === 2,
@@ -5154,6 +5155,7 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
 
       // Automated configure-statusline invocation
       assert(rawBat.includes('configure-statusline.js'), 'install.bat must invoke configure-statusline.js');
+      assert(rawBat.includes('configure-rules.js'), 'install.bat must invoke configure-rules.js');
       assert(rawBat.includes('"type": "command"'), 'install.bat statusLine snippet must include "type": "command"');
       assert(rawBat.includes('!STATUSLINE_CMD!'), 'install.bat must reference statusline command variable');
     });
@@ -5184,6 +5186,7 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
 
       // Automated configure-statusline invocation
       assert(rawSh.includes('configure-statusline.js'), 'install.sh must invoke configure-statusline.js');
+      assert(rawSh.includes('configure-rules.js'), 'install.sh must invoke configure-rules.js');
       assert(rawSh.includes('"type": "command"'), 'install.sh statusLine snippet must include "type": "command"');
       assert(rawSh.includes('$STATUSLINE_CMD'), 'install.sh must reference statusline command variable');
     });
@@ -5306,6 +5309,50 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
 
       const parsed3 = parseArgs(['custom-positional-cmd']);
       assert.strictEqual(parsed3.command, 'custom-positional-cmd');
+    });
+
+    await test('scripts/lib/configure-rules.js should deploy rules and handle idempotency, backups, and CLI args', () => {
+      const configRulesPath = path.join(__dirname, '..', 'scripts', 'lib', 'configure-rules.js');
+      assert(fs.existsSync(configRulesPath), 'scripts/lib/configure-rules.js must exist');
+      const { configureRules, parseArgs: parseRulesArgs } = require(configRulesPath);
+
+      const tmpSrc = path.join(os.tmpdir(), `agy-test-rules-src-${Date.now()}`);
+      const tmpTgt = path.join(os.tmpdir(), `agy-test-rules-tgt-${Date.now()}`);
+      fs.mkdirSync(tmpSrc, { recursive: true });
+      fs.mkdirSync(tmpTgt, { recursive: true });
+
+      try {
+        fs.writeFileSync(path.join(tmpSrc, 'RULE1.md'), '# Rule 1 Initial', 'utf8');
+        fs.writeFileSync(path.join(tmpSrc, 'RULE2.md'), '# Rule 2 Initial', 'utf8');
+
+        // 1. Initial deployment
+        const res1 = configureRules({ sourceDir: tmpSrc, targetDir: tmpTgt });
+        assert.strictEqual(res1.length, 2);
+        assert.strictEqual(res1[0].action, 'created');
+        assert.strictEqual(res1[1].action, 'created');
+        assert.strictEqual(fs.readFileSync(path.join(tmpTgt, 'RULE1.md'), 'utf8'), '# Rule 1 Initial');
+
+        // 2. Idempotent deployment (no changes)
+        const res2 = configureRules({ sourceDir: tmpSrc, targetDir: tmpTgt });
+        assert.strictEqual(res2[0].action, 'identical');
+        assert.strictEqual(res2[1].action, 'identical');
+
+        // 3. Updated source should create backup and update target
+        fs.writeFileSync(path.join(tmpSrc, 'RULE1.md'), '# Rule 1 Updated', 'utf8');
+        const res3 = configureRules({ sourceDir: tmpSrc, targetDir: tmpTgt });
+        assert.strictEqual(res3[0].action, 'updated');
+        assert(res3[0].backupPath && fs.existsSync(res3[0].backupPath));
+        assert.strictEqual(fs.readFileSync(path.join(tmpTgt, 'RULE1.md'), 'utf8'), '# Rule 1 Updated');
+
+        // 4. CLI arg parsing
+        const parsed = parseRulesArgs(['--force', '--source', '/tmp/src', '--target', '/tmp/tgt']);
+        assert.strictEqual(parsed.force, true);
+        assert.strictEqual(parsed.sourceDir, path.resolve('/tmp/src'));
+        assert.strictEqual(parsed.targetDir, path.resolve('/tmp/tgt'));
+      } finally {
+        fs.rmSync(tmpSrc, { recursive: true, force: true });
+        fs.rmSync(tmpTgt, { recursive: true, force: true });
+      }
     });
   });
 
@@ -5693,6 +5740,149 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
       assert.strictEqual(dataJson.version, 3);
 
       await serve.stopDashboardServer(info.server);
+    });
+  });
+
+  // --- 28. Statusline & Dashboard Reliability Validations ---
+  await describe('28. Statusline & Dashboard Reliability Validations', async () => {
+    const htmlReport = require('../src/html-report');
+    await test('renderDashboardHtml embeds clientScript that parses cleanly in vm.Script without syntax errors', () => {
+      const payload = htmlReport.buildDashboardPayload([]);
+      const html = htmlReport.renderDashboardHtml(payload);
+      const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+      assert(scripts.length >= 2, 'Should contain at least 2 script tags');
+      for (let i = 0; i < scripts.length; i++) {
+        assert.doesNotThrow(() => {
+          new vm.Script(scripts[i][1]);
+        }, `Script ${i} should have valid JavaScript syntax without syntax errors`);
+      }
+    });
+
+    await test('discoverSessions discovers sessions across brain and sibling sessions directories with deduplication', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-test-sibling-'));
+      try {
+        const brainDir = path.join(tmpDir, 'brain');
+        const sessionsDir = path.join(tmpDir, 'sessions');
+        fs.mkdirSync(path.join(brainDir, 'sess-1', 'logs'), { recursive: true });
+        fs.writeFileSync(
+          path.join(brainDir, 'sess-1', 'logs', 'transcript.jsonl'),
+          JSON.stringify({ created_at: '2026-09-19T10:00:00Z', source: 'USER_INPUT', content: 'hello' }) + '\n'
+        );
+        fs.mkdirSync(path.join(sessionsDir, 'sess-2', 'logs'), { recursive: true });
+        fs.writeFileSync(
+          path.join(sessionsDir, 'sess-2', 'logs', 'transcript.jsonl'),
+          JSON.stringify({ created_at: '2026-09-19T11:00:00Z', source: 'USER_INPUT', content: 'world' }) + '\n'
+        );
+        // Duplicate session in sessionsDir should be deduplicated
+        fs.mkdirSync(path.join(sessionsDir, 'sess-1', 'logs'), { recursive: true });
+        fs.writeFileSync(
+          path.join(sessionsDir, 'sess-1', 'logs', 'transcript.jsonl'),
+          JSON.stringify({ created_at: '2026-09-19T10:00:00Z', source: 'USER_INPUT', content: 'dup' }) + '\n'
+        );
+
+        const discovered = logParser.discoverSessions(brainDir);
+        assert.strictEqual(discovered.length, 2);
+        const ids = discovered.map(d => d.sessionId);
+        assert(ids.includes('sess-1'));
+        assert(ids.includes('sess-2'));
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('syncSessions orders sessions by most recent activity timestamp rather than creation time', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-test-order-'));
+      try {
+        const brainDir = path.join(tmpDir, 'brain');
+        const cacheFile = path.join(tmpDir, 'cache.json');
+        // Session Old: created yesterday at 08:00, but active today at 12:00
+        fs.mkdirSync(path.join(brainDir, 'sess-old', 'logs'), { recursive: true });
+        fs.writeFileSync(
+          path.join(brainDir, 'sess-old', 'logs', 'transcript.jsonl'),
+          JSON.stringify({ created_at: '2026-09-18T08:00:00Z', source: 'USER_INPUT', content: 'old turn 1' }) + '\n' +
+          JSON.stringify({ created_at: '2026-09-19T12:00:00Z', source: 'USER_INPUT', content: 'new turn 2' }) + '\n'
+        );
+        // Session New: created today at 09:00, but inactive since 09:05
+        fs.mkdirSync(path.join(brainDir, 'sess-new', 'logs'), { recursive: true });
+        fs.writeFileSync(
+          path.join(brainDir, 'sess-new', 'logs', 'transcript.jsonl'),
+          JSON.stringify({ created_at: '2026-09-19T09:00:00Z', source: 'USER_INPUT', content: 'turn 1' }) + '\n' +
+          JSON.stringify({ created_at: '2026-09-19T09:05:00Z', source: 'USER_INPUT', content: 'turn 2' }) + '\n'
+        );
+
+        const res = await cacheManager.syncSessions({ brainDir, cachePath: cacheFile });
+        assert.strictEqual(res.sessions.length, 2);
+        // sess-old has latest turn at 12:00, so it must be index 0
+        assert.strictEqual(res.sessions[0].sessionId, 'sess-old');
+        assert.strictEqual(res.sessions[1].sessionId, 'sess-new');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('handlePostInvocation targets ANTIGRAVITY_CONVERSATION_ID from env and falls back to most active session', async () => {
+      const prevEnv = process.env.ANTIGRAVITY_CONVERSATION_ID;
+      try {
+        const mockSessions = [
+          {
+            sessionId: 'sess-inactive',
+            startTime: '2026-09-19T08:00:00Z',
+            endTime: '2026-09-19T08:05:00Z',
+            turns: [{ totalTokens: 50, costUsd: 0.001, createdAt: '2026-09-19T08:05:00Z' }]
+          },
+          {
+            sessionId: 'sess-active',
+            startTime: '2026-09-18T20:00:00Z',
+            endTime: '2026-09-19T14:00:00Z',
+            turns: [{ totalTokens: 250, costUsd: 0.005, createdAt: '2026-09-19T14:00:00Z' }]
+          }
+        ];
+
+        // 1. Without env var, should pick most active session (sess-active with turn at 14:00)
+        delete process.env.ANTIGRAVITY_CONVERSATION_ID;
+        const res1 = await hookHandler.handlePostInvocation({ sessions: mockSessions });
+        assert.strictEqual(res1.turnTokens, 250);
+
+        // 2. With env var, should target the specified conversation even if older
+        process.env.ANTIGRAVITY_CONVERSATION_ID = 'sess-inactive';
+        const res2 = await hookHandler.handlePostInvocation({ sessions: mockSessions });
+        assert.strictEqual(res2.turnTokens, 50);
+      } finally {
+        if (prevEnv !== undefined) {
+          process.env.ANTIGRAVITY_CONVERSATION_ID = prevEnv;
+        } else {
+          delete process.env.ANTIGRAVITY_CONVERSATION_ID;
+        }
+      }
+    });
+
+    await test('getEnvLanguageServerTarget extracts target from ANTIGRAVITY_LS_ADDRESS and ANTIGRAVITY_LS_PORT env vars', () => {
+      const prevAddr = process.env.ANTIGRAVITY_LS_ADDRESS;
+      const prevPort = process.env.ANTIGRAVITY_LS_PORT;
+      try {
+        process.env.ANTIGRAVITY_LS_ADDRESS = 'localhost:63768';
+        delete process.env.ANTIGRAVITY_LS_PORT;
+        const res1 = geminiQuota.getEnvLanguageServerTarget();
+        assert(res1 !== null);
+        assert.strictEqual(res1.port, 63768);
+
+        delete process.env.ANTIGRAVITY_LS_ADDRESS;
+        process.env.ANTIGRAVITY_LS_PORT = '54321';
+        const res2 = geminiQuota.getEnvLanguageServerTarget();
+        assert(res2 !== null);
+        assert.strictEqual(res2.port, 54321);
+      } finally {
+        if (prevAddr !== undefined) process.env.ANTIGRAVITY_LS_ADDRESS = prevAddr;
+        else delete process.env.ANTIGRAVITY_LS_ADDRESS;
+        if (prevPort !== undefined) process.env.ANTIGRAVITY_LS_PORT = prevPort;
+        else delete process.env.ANTIGRAVITY_LS_PORT;
+      }
+    });
+
+    await test('triggerBackgroundQuotaRefresh triggers refresh with forceRefresh to bypass stale probe cooldowns', () => {
+      assert(typeof geminiQuota.triggerBackgroundQuotaRefresh === 'function');
+      const spawned = geminiQuota.triggerBackgroundQuotaRefresh();
+      assert(typeof spawned === 'boolean');
     });
   });
 

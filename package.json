@@ -12,7 +12,8 @@
   "scripts": {
     "start": "node bin/agy-tools.js",
     "dashboard": "node bin/agy-dashboard.js",
-    "test": "node test/run-tests.js"
+    "test": "node test/run-tests.js",
+    "sync-rules": "node scripts/lib/configure-rules.js"
   },
   "keywords": [
     "antigravity",
@@ -40,6 +41,7 @@
     "bin",
     "src",
     "scripts",
+    "rules",
     "data",
     "docs",
     "LICENSE",

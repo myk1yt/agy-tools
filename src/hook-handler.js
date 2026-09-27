@@ -112,7 +112,11 @@ async function handlePostInvocation(options = {}) {
     modelName = options.stdinContext.modelName;
   }
 
-  const conversationId = options.conversationId || (options.stdinContext ? options.stdinContext.conversationId : null);
+  const conversationId = options.conversationId ||
+    (options.stdinContext ? options.stdinContext.conversationId : null) ||
+    process.env.ANTIGRAVITY_CONVERSATION_ID ||
+    process.env.CONVERSATION_ID ||
+    null;
 
   let sessions = Array.isArray(options.sessions) ? options.sessions : null;
   if (!sessions) {
@@ -128,7 +132,21 @@ async function handlePostInvocation(options = {}) {
   }
 
   if (!targetSession && sessions.length > 0) {
-    targetSession = sessions[0];
+    const getActiveTime = (s) => {
+      if (!s) return 0;
+      const lastTurnTime = s.turns && s.turns.length > 0
+        ? new Date(s.turns[s.turns.length - 1].createdAt || 0).getTime()
+        : 0;
+      const endTime = s.endTime ? new Date(s.endTime).getTime() : 0;
+      const startTime = s.startTime ? new Date(s.startTime).getTime() : 0;
+      const logicalTime = Math.max(lastTurnTime, endTime, startTime);
+      if (logicalTime > 0) return logicalTime;
+      return s.mtimeMs || 0;
+    };
+    targetSession = sessions.reduce((latest, current) => {
+      if (!latest) return current;
+      return getActiveTime(current) > getActiveTime(latest) ? current : latest;
+    }, sessions[0]);
   }
 
   if (targetSession && targetSession.turns && targetSession.turns.length > 0) {

@@ -14,9 +14,52 @@ const os = require('os');
  */
 const HOME_DIR = os.homedir();
 const GEMINI_DIR = path.join(HOME_DIR, '.gemini');
-const ANTIGRAVITY_DIR = path.join(GEMINI_DIR, 'antigravity-cli');
-const BRAIN_DIR = path.join(ANTIGRAVITY_DIR, 'brain');
-const HISTORY_FILE = path.join(ANTIGRAVITY_DIR, 'history.jsonl');
+const ANTIGRAVITY_DIR = process.env.ANTIGRAVITY_APP_DATA_DIR
+  ? path.resolve(process.env.ANTIGRAVITY_APP_DATA_DIR)
+  : (fs.existsSync(path.join(GEMINI_DIR, 'antigravity-cli'))
+      ? path.join(GEMINI_DIR, 'antigravity-cli')
+      : (fs.existsSync(path.join(GEMINI_DIR, 'antigravity'))
+          ? path.join(GEMINI_DIR, 'antigravity')
+          : path.join(GEMINI_DIR, 'antigravity-cli')));
+
+function resolveBrainDir(antigravityDir, geminiDir) {
+  if (process.env.ANTIGRAVITY_BRAIN_DIR) return path.resolve(process.env.ANTIGRAVITY_BRAIN_DIR);
+  if (process.env.BRAIN_DIR) return path.resolve(process.env.BRAIN_DIR);
+  if (process.env.ANTIGRAVITY_SESSIONS_DIR) return path.resolve(process.env.ANTIGRAVITY_SESSIONS_DIR);
+
+  const candidates = [
+    path.join(antigravityDir, 'brain'),
+    path.join(antigravityDir, 'sessions'),
+    path.join(geminiDir, 'antigravity-cli', 'brain'),
+    path.join(geminiDir, 'antigravity-cli', 'sessions'),
+    path.join(geminiDir, 'antigravity', 'brain'),
+    path.join(geminiDir, 'antigravity', 'sessions'),
+    path.join(geminiDir, 'brain'),
+    path.join(geminiDir, 'sessions')
+  ];
+
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return path.join(antigravityDir, 'brain');
+}
+
+function resolveHistoryFile(antigravityDir, geminiDir) {
+  if (process.env.ANTIGRAVITY_HISTORY_FILE) return path.resolve(process.env.ANTIGRAVITY_HISTORY_FILE);
+  const candidates = [
+    path.join(antigravityDir, 'history.jsonl'),
+    path.join(geminiDir, 'antigravity-cli', 'history.jsonl'),
+    path.join(geminiDir, 'antigravity', 'history.jsonl'),
+    path.join(geminiDir, 'history.jsonl')
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return path.join(antigravityDir, 'history.jsonl');
+}
+
+const BRAIN_DIR = resolveBrainDir(ANTIGRAVITY_DIR, GEMINI_DIR);
+const HISTORY_FILE = resolveHistoryFile(ANTIGRAVITY_DIR, GEMINI_DIR);
 const SETTINGS_FILE = path.join(ANTIGRAVITY_DIR, 'settings.json');
 const CACHE_FILE = path.join(GEMINI_DIR, 'token_tracker_cache.json');
 const USER_CONFIG_FILE = path.join(GEMINI_DIR, 'antigravity_tokens.json');
