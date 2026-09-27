@@ -2301,7 +2301,7 @@ async function runAllTests() {
         }
       ];
 
-      const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en' });
+      const payload = htmlReport.buildDashboardPayload(sessions, { currency: 'usd', lang: 'en', refDate: d2 });
 
       // 1. payload.models has 2 distinct entries keyed by model name
       assert(Array.isArray(payload.models) && payload.models.length === 2,
