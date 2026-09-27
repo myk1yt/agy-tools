@@ -57,8 +57,8 @@ echo "[INFO] Configuring Antigravity statusLine integration..."
 node "$ROOT_DIR/scripts/lib/configure-statusline.js" --command "$STATUSLINE_CMD"
 
 echo ""
-echo "[INFO] Configuring Antigravity agent rules and protocols..."
-node "$ROOT_DIR/scripts/lib/configure-rules.js"
+echo "[INFO] Configuring Antigravity agent rules, plugins, skills, and lifecycle hooks..."
+node "$ROOT_DIR/scripts/lib/configure-customizations.js"
 
 
 echo ""

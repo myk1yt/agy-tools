@@ -5155,7 +5155,7 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
 
       // Automated configure-statusline invocation
       assert(rawBat.includes('configure-statusline.js'), 'install.bat must invoke configure-statusline.js');
-      assert(rawBat.includes('configure-rules.js'), 'install.bat must invoke configure-rules.js');
+      assert(rawBat.includes('configure-customizations.js'), 'install.bat must invoke configure-customizations.js');
       assert(rawBat.includes('"type": "command"'), 'install.bat statusLine snippet must include "type": "command"');
       assert(rawBat.includes('!STATUSLINE_CMD!'), 'install.bat must reference statusline command variable');
     });
@@ -5186,7 +5186,7 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
 
       // Automated configure-statusline invocation
       assert(rawSh.includes('configure-statusline.js'), 'install.sh must invoke configure-statusline.js');
-      assert(rawSh.includes('configure-rules.js'), 'install.sh must invoke configure-rules.js');
+      assert(rawSh.includes('configure-customizations.js'), 'install.sh must invoke configure-customizations.js');
       assert(rawSh.includes('"type": "command"'), 'install.sh statusLine snippet must include "type": "command"');
       assert(rawSh.includes('$STATUSLINE_CMD'), 'install.sh must reference statusline command variable');
     });
@@ -5352,6 +5352,61 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
       } finally {
         fs.rmSync(tmpSrc, { recursive: true, force: true });
         fs.rmSync(tmpTgt, { recursive: true, force: true });
+      }
+    });
+
+    await test('scripts/lib/configure-customizations.js should deploy all customizations across categories', () => {
+      const configCustPath = path.join(__dirname, '..', 'scripts', 'lib', 'configure-customizations.js');
+      assert(fs.existsSync(configCustPath), 'scripts/lib/configure-customizations.js must exist');
+      const { deployAllCustomizations, parseArgs: parseCustArgs } = require(configCustPath);
+
+      const tmpRepo = path.join(os.tmpdir(), `agy-test-cust-repo-${Date.now()}`);
+      const tmpConfig = path.join(os.tmpdir(), `agy-test-cust-tgt-${Date.now()}`);
+      fs.mkdirSync(path.join(tmpRepo, 'rules'), { recursive: true });
+      fs.mkdirSync(path.join(tmpRepo, 'plugins', 'my_plugin'), { recursive: true });
+      fs.mkdirSync(path.join(tmpRepo, 'skills', 'my_skill'), { recursive: true });
+      fs.mkdirSync(path.join(tmpRepo, 'hooks'), { recursive: true });
+
+      try {
+        fs.writeFileSync(path.join(tmpRepo, 'rules', 'AGENTS.md'), '# Agents Rule', 'utf8');
+        fs.writeFileSync(path.join(tmpRepo, 'plugins', 'my_plugin', 'plugin.json'), '{"name":"test"}', 'utf8');
+        fs.writeFileSync(path.join(tmpRepo, 'skills', 'my_skill', 'SKILL.md'), '# My Skill', 'utf8');
+        fs.writeFileSync(path.join(tmpRepo, 'hooks', 'hooks.json'), '{"hooks":{}}', 'utf8');
+
+        // 1. Initial full deployment
+        const sum1 = deployAllCustomizations({ repoRoot: tmpRepo, configDir: tmpConfig });
+        assert.strictEqual(sum1.created, 4);
+        assert.strictEqual(sum1.updated, 0);
+        assert.strictEqual(sum1.identical, 0);
+
+        // Verify files deployed to respective destinations
+        assert(fs.existsSync(path.join(tmpConfig, 'rules', 'AGENTS.md')));
+        assert(fs.existsSync(path.join(tmpConfig, 'plugins', 'my_plugin', 'plugin.json')));
+        assert(fs.existsSync(path.join(tmpConfig, 'skills', 'my_skill', 'SKILL.md')));
+        assert(fs.existsSync(path.join(tmpConfig, 'hooks', 'hooks.json')));
+
+        // 2. Idempotent deployment
+        const sum2 = deployAllCustomizations({ repoRoot: tmpRepo, configDir: tmpConfig });
+        assert.strictEqual(sum2.created, 0);
+        assert.strictEqual(sum2.updated, 0);
+        assert.strictEqual(sum2.identical, 4);
+
+        // 3. Updated source deployment
+        fs.writeFileSync(path.join(tmpRepo, 'rules', 'AGENTS.md'), '# Agents Rule V2', 'utf8');
+        const sum3 = deployAllCustomizations({ repoRoot: tmpRepo, configDir: tmpConfig });
+        assert.strictEqual(sum3.created, 0);
+        assert.strictEqual(sum3.updated, 1);
+        assert.strictEqual(sum3.identical, 3);
+        assert.strictEqual(fs.readFileSync(path.join(tmpConfig, 'rules', 'AGENTS.md'), 'utf8'), '# Agents Rule V2');
+
+        // 4. CLI arg parsing
+        const parsed = parseCustArgs(['--force', '--source', '/tmp/repo', '--target', '/tmp/cfg']);
+        assert.strictEqual(parsed.force, true);
+        assert.strictEqual(parsed.repoRoot, path.resolve('/tmp/repo'));
+        assert.strictEqual(parsed.configDir, path.resolve('/tmp/cfg'));
+      } finally {
+        fs.rmSync(tmpRepo, { recursive: true, force: true });
+        fs.rmSync(tmpConfig, { recursive: true, force: true });
       }
     });
   });
