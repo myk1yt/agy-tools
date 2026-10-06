@@ -211,7 +211,7 @@ async function runAllTests() {
     await test('Should dynamically resolve Pro Tier via smart fuzzy heuristic for unlisted models', () => {
       const modelsToTest = [
         'gemini-3.5-pro-preview',
-        'gemini-ultra-preview',
+        'gemini-pro-preview',
         'llama-3-70b-large',
         'qwen-max-latest',
         'deepseek-high'
@@ -223,6 +223,22 @@ async function runAllTests() {
         assert.strictEqual(pricing.cachedInputPerMillion, 0.3125, `Expected cached input 0.3125 for ${m}`);
         assert.strictEqual(pricing.outputPerMillion, 5.00, `Expected output 5.00 for ${m}`);
         assert.strictEqual(pricing.tier, 'pro', `Expected pro tier for ${m}`);
+      }
+    });
+
+    await test('Should dynamically resolve Ultra Tier via smart fuzzy heuristic for unlisted models', () => {
+      const modelsToTest = [
+        'gemini-ultra-preview',
+        'google-ultra-exp',
+        'custom-ultra-model'
+      ];
+
+      for (const m of modelsToTest) {
+        const pricing = config.getModelPricing(m);
+        assert.strictEqual(pricing.inputPerMillion, 2.50, `Expected input 2.50 for ${m}`);
+        assert.strictEqual(pricing.cachedInputPerMillion, 0.625, `Expected cached input 0.625 for ${m}`);
+        assert.strictEqual(pricing.outputPerMillion, 10.00, `Expected output 10.00 for ${m}`);
+        assert.strictEqual(pricing.tier, 'ultra', `Expected ultra tier for ${m}`);
       }
     });
 
@@ -279,7 +295,9 @@ async function runAllTests() {
       assert(!baseFromSettings.includes('('), `Settings fallback must be suffix-stripped, got "${baseFromSettings}"`);
 
       const pricing = config.getModelPricing('Claude Opus 4.6 (Thinking)');
-      assert.strictEqual(pricing.id, 'claude-3-opus', `Suffixed "Claude Opus 4.6 (Thinking)" must resolve to claude-opus tier, got "${pricing.id}"`);
+      assert.strictEqual(pricing.id, 'claude-opus-4.6', `Suffixed "Claude Opus 4.6 (Thinking)" must resolve to claude-opus-4.6, got "${pricing.id}"`);
+      assert.strictEqual(pricing.inputPerMillion, 15.00);
+      assert.strictEqual(pricing.outputPerMillion, 75.00);
     });
 
     await test('Should merge user configuration custom pricing models directly into MODEL_PRICING', () => {
@@ -1266,11 +1284,71 @@ async function runAllTests() {
       assert.strictEqual(models['gemini-2.0-flash-lite'].inputPerMillion, 0.075);
       assert.strictEqual(models['gemini-2.0-flash-lite'].cachedInputPerMillion, 0.01875);
       assert.strictEqual(models['gemini-2.0-flash-lite'].outputPerMillion, 0.30);
+
+      // Gemini 3.8 Flash
+      assert(models['gemini-3.8-flash']);
+      assert.strictEqual(models['gemini-3.8-flash'].inputPerMillion, 0.15);
+      assert.strictEqual(models['gemini-3.8-flash'].cachedInputPerMillion, 0.0375);
+      assert.strictEqual(models['gemini-3.8-flash'].outputPerMillion, 0.60);
+
+      // Gemini 3.8 Flash Thinking
+      assert(models['gemini-3.8-flash-thinking']);
+      assert.strictEqual(models['gemini-3.8-flash-thinking'].inputPerMillion, 0.15);
+      assert.strictEqual(models['gemini-3.8-flash-thinking'].cachedInputPerMillion, 0.0375);
+      assert.strictEqual(models['gemini-3.8-flash-thinking'].outputPerMillion, 0.60);
+
+      // Gemini 3.0 Flash
+      assert(models['gemini-3.0-flash']);
+      assert.strictEqual(models['gemini-3.0-flash'].inputPerMillion, 0.15);
+      assert.strictEqual(models['gemini-3.0-flash'].cachedInputPerMillion, 0.0375);
+      assert.strictEqual(models['gemini-3.0-flash'].outputPerMillion, 0.60);
+
+      // Gemini 3.0 Pro
+      assert(models['gemini-3.0-pro']);
+      assert.strictEqual(models['gemini-3.0-pro'].inputPerMillion, 1.25);
+      assert.strictEqual(models['gemini-3.0-pro'].cachedInputPerMillion, 0.3125);
+      assert.strictEqual(models['gemini-3.0-pro'].outputPerMillion, 5.00);
+
+      // Gemini 1.5 Flash
+      assert(models['gemini-1.5-flash']);
+      assert.strictEqual(models['gemini-1.5-flash'].inputPerMillion, 0.075);
+      assert.strictEqual(models['gemini-1.5-flash'].cachedInputPerMillion, 0.01875);
+      assert.strictEqual(models['gemini-1.5-flash'].outputPerMillion, 0.30);
+
+      // Gemini 1.5 Pro
+      assert(models['gemini-1.5-pro']);
+      assert.strictEqual(models['gemini-1.5-pro'].inputPerMillion, 1.25);
+      assert.strictEqual(models['gemini-1.5-pro'].cachedInputPerMillion, 0.3125);
+      assert.strictEqual(models['gemini-1.5-pro'].outputPerMillion, 5.00);
     });
 
     await test('Should have complete official Anthropic Claude models and exact rates', () => {
       const catalog = JSON.parse(fs.readFileSync(pricingFilePath, 'utf8'));
       const models = catalog.models;
+
+      // Claude Opus 5.5
+      assert(models['claude-opus-5.5']);
+      assert.strictEqual(models['claude-opus-5.5'].inputPerMillion, 15.00);
+      assert.strictEqual(models['claude-opus-5.5'].cachedInputPerMillion, 1.50);
+      assert.strictEqual(models['claude-opus-5.5'].outputPerMillion, 75.00);
+
+      // Claude Opus 4.6
+      assert(models['claude-opus-4.6']);
+      assert.strictEqual(models['claude-opus-4.6'].inputPerMillion, 15.00);
+      assert.strictEqual(models['claude-opus-4.6'].cachedInputPerMillion, 1.50);
+      assert.strictEqual(models['claude-opus-4.6'].outputPerMillion, 75.00);
+
+      // Claude Sonnet 5.5
+      assert(models['claude-sonnet-5.5']);
+      assert.strictEqual(models['claude-sonnet-5.5'].inputPerMillion, 3.00);
+      assert.strictEqual(models['claude-sonnet-5.5'].cachedInputPerMillion, 0.30);
+      assert.strictEqual(models['claude-sonnet-5.5'].outputPerMillion, 15.00);
+
+      // Claude Sonnet 4.6
+      assert(models['claude-sonnet-4.6']);
+      assert.strictEqual(models['claude-sonnet-4.6'].inputPerMillion, 3.00);
+      assert.strictEqual(models['claude-sonnet-4.6'].cachedInputPerMillion, 0.30);
+      assert.strictEqual(models['claude-sonnet-4.6'].outputPerMillion, 15.00);
 
       // Claude 3.7 Sonnet
       assert(models['claude-3.7-sonnet']);
@@ -1295,6 +1373,23 @@ async function runAllTests() {
       assert.strictEqual(models['claude-3-opus'].inputPerMillion, 15.00);
       assert.strictEqual(models['claude-3-opus'].cachedInputPerMillion, 1.50);
       assert.strictEqual(models['claude-3-opus'].outputPerMillion, 75.00);
+    });
+
+    await test('Should have complete official DeepSeek models and exact rates', () => {
+      const catalog = JSON.parse(fs.readFileSync(pricingFilePath, 'utf8'));
+      const models = catalog.models;
+
+      // DeepSeek V3
+      assert(models['deepseek-v3']);
+      assert.strictEqual(models['deepseek-v3'].inputPerMillion, 0.14);
+      assert.strictEqual(models['deepseek-v3'].cachedInputPerMillion, 0.014);
+      assert.strictEqual(models['deepseek-v3'].outputPerMillion, 0.28);
+
+      // DeepSeek R1
+      assert(models['deepseek-r1']);
+      assert.strictEqual(models['deepseek-r1'].inputPerMillion, 0.55);
+      assert.strictEqual(models['deepseek-r1'].cachedInputPerMillion, 0.14);
+      assert.strictEqual(models['deepseek-r1'].outputPerMillion, 2.19);
     });
 
     await test('Should have complete official OpenAI models and exact rates', () => {
@@ -1333,6 +1428,7 @@ async function runAllTests() {
       assert(catalog.sources.google.includes('ai.google.dev'));
       assert(catalog.sources.anthropic.includes('anthropic.com'));
       assert(catalog.sources.openai.includes('openai.com'));
+      assert(catalog.sources.deepseek.includes('deepseek.com'));
     });
   });
 
@@ -2941,9 +3037,10 @@ async function runAllTests() {
       assert.strictEqual(pricing.id, 'gemini-2.0-flash');
     });
 
-    await test('getModelPricing("sonnet") still returns claude-3.5-sonnet via exact alias', () => {
+    await test('getModelPricing("sonnet") resolves to sonnet tier pricing ($3.00/$15.00) without collision', () => {
       const pricing = config.getModelPricing('sonnet');
-      assert.strictEqual(pricing.id, 'claude-3.5-sonnet');
+      assert.strictEqual(pricing.inputPerMillion, 3.00);
+      assert.strictEqual(pricing.outputPerMillion, 15.00);
     });
   });
 
@@ -6180,6 +6277,118 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
       });
 
       assert(res.badge.includes('85%'), `Badge must reflect real-time 85% instead of frozen 95%, got: ${res.badge}`);
+    });
+  });
+
+  // --- Suite 30: Generational Version-Aware & Provider-Aware Pricing Engine ---
+  await describe('30. Generational Version-Aware & Provider-Aware Pricing Engine', async () => {
+    await test('Generational pricing: gemini-3.8-flash ($0.15) vs gemini-2.0-flash ($0.10) vs gemini-2.0-flash-lite ($0.075)', () => {
+      const g38 = config.getModelPricing('gemini-3.8-flash');
+      assert.strictEqual(g38.inputPerMillion, 0.15);
+      assert.strictEqual(g38.cachedInputPerMillion, 0.0375);
+      assert.strictEqual(g38.outputPerMillion, 0.60);
+
+      const g20 = config.getModelPricing('gemini-2.0-flash');
+      assert.strictEqual(g20.inputPerMillion, 0.10);
+      assert.strictEqual(g20.cachedInputPerMillion, 0.025);
+      assert.strictEqual(g20.outputPerMillion, 0.40);
+
+      const g20lite = config.getModelPricing('gemini-2.0-flash-lite');
+      assert.strictEqual(g20lite.inputPerMillion, 0.075);
+      assert.strictEqual(g20lite.cachedInputPerMillion, 0.01875);
+      assert.strictEqual(g20lite.outputPerMillion, 0.30);
+    });
+
+    await test('Generational Opus: opus-5.5 ($15.00) vs opus-4.6 ($15.00) vs claude-3-opus ($15.00), verifying none mispriced as $1.25', () => {
+      const op55 = config.getModelPricing('opus-5.5');
+      assert.strictEqual(op55.inputPerMillion, 15.00);
+      assert.strictEqual(op55.cachedInputPerMillion, 1.50);
+      assert.strictEqual(op55.outputPerMillion, 75.00);
+      assert.notStrictEqual(op55.inputPerMillion, 1.25, 'opus-5.5 must NEVER be priced as generic $1.25 Pro');
+
+      const op46 = config.getModelPricing('opus-4.6');
+      assert.strictEqual(op46.inputPerMillion, 15.00);
+      assert.strictEqual(op46.cachedInputPerMillion, 1.50);
+      assert.strictEqual(op46.outputPerMillion, 75.00);
+      assert.notStrictEqual(op46.inputPerMillion, 1.25, 'opus-4.6 must NEVER be priced as generic $1.25 Pro');
+
+      const c3op = config.getModelPricing('claude-3-opus');
+      assert.strictEqual(c3op.inputPerMillion, 15.00);
+      assert.strictEqual(c3op.cachedInputPerMillion, 1.50);
+      assert.strictEqual(c3op.outputPerMillion, 75.00);
+      assert.notStrictEqual(c3op.inputPerMillion, 1.25, 'claude-3-opus must NEVER be priced as generic $1.25 Pro');
+    });
+
+    await test('Generational Sonnet: claude-sonnet-5.5 ($3.00) vs claude-3.5-sonnet ($3.00)', () => {
+      const son55 = config.getModelPricing('claude-sonnet-5.5');
+      assert.strictEqual(son55.inputPerMillion, 3.00);
+      assert.strictEqual(son55.cachedInputPerMillion, 0.30);
+      assert.strictEqual(son55.outputPerMillion, 15.00);
+      assert.strictEqual(son55.id, 'claude-sonnet-5.5');
+
+      const son35 = config.getModelPricing('claude-3.5-sonnet');
+      assert.strictEqual(son35.inputPerMillion, 3.00);
+      assert.strictEqual(son35.cachedInputPerMillion, 0.30);
+      assert.strictEqual(son35.outputPerMillion, 15.00);
+      assert.strictEqual(son35.id, 'claude-3.5-sonnet');
+    });
+
+    await test('Future unknown model heuristics: gemini-4.2-flash ($0.15), gemini-2.1-flash ($0.10), claude-opus-6.0 ($15.00), deepseek-v3 ($0.14)', () => {
+      const g42 = config.getModelPricing('gemini-4.2-flash');
+      assert.strictEqual(g42.inputPerMillion, 0.15);
+      assert.strictEqual(g42.cachedInputPerMillion, 0.0375);
+      assert.strictEqual(g42.outputPerMillion, 0.60);
+
+      const g21 = config.getModelPricing('gemini-2.1-flash');
+      assert.strictEqual(g21.inputPerMillion, 0.10);
+      assert.strictEqual(g21.cachedInputPerMillion, 0.025);
+      assert.strictEqual(g21.outputPerMillion, 0.40);
+
+      const op60 = config.getModelPricing('claude-opus-6.0');
+      assert.strictEqual(op60.inputPerMillion, 15.00);
+      assert.strictEqual(op60.cachedInputPerMillion, 1.50);
+      assert.strictEqual(op60.outputPerMillion, 75.00);
+
+      const dsv3 = config.getModelPricing('deepseek-v3');
+      assert.strictEqual(dsv3.inputPerMillion, 0.14);
+      assert.strictEqual(dsv3.cachedInputPerMillion, 0.014);
+      assert.strictEqual(dsv3.outputPerMillion, 0.28);
+    });
+
+    await test('Defensive calculateCostUsd with undefined/null inputs returns valid numeric 0, not NaN', () => {
+      const res1 = config.calculateCostUsd(undefined, null, undefined, 'gemini-3.7-flash');
+      assert.strictEqual(res1, 0);
+      assert(!isNaN(res1));
+
+      const res2 = config.calculateCostUsd(null, null, null, 'claude-opus-5.5');
+      assert.strictEqual(res2, 0);
+      assert(!isNaN(res2));
+
+      const res3 = config.calculateCostUsd(NaN, undefined, null, 'gemini-3.8-flash');
+      assert.strictEqual(res3, 0);
+      assert(!isNaN(res3));
+
+      const savings = config.calculateCacheSavingsUsd(null, 'gemini-3.8-flash');
+      assert.strictEqual(savings, 0);
+      assert(!isNaN(savings));
+    });
+
+    await test('KRW displayDecimals is 0 (whole integer currency)', () => {
+      assert.strictEqual(config.CURRENCIES.krw.displayDecimals, 0);
+    });
+
+    await test('Bare single-word aliases do not cause false substring collisions', () => {
+      const op55 = config.getModelPricing('opus-5.5');
+      assert.strictEqual(op55.id, 'claude-opus-5.5');
+
+      const op46 = config.getModelPricing('opus-4.6');
+      assert.strictEqual(op46.id, 'claude-opus-4.6');
+
+      const son55 = config.getModelPricing('sonnet-5.5');
+      assert.strictEqual(son55.id, 'claude-sonnet-5.5');
+
+      const son46 = config.getModelPricing('sonnet-4.6');
+      assert.strictEqual(son46.id, 'claude-sonnet-4.6');
     });
   });
 
