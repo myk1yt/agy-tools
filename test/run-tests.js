@@ -5182,7 +5182,7 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
       assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-tools.js" "$USER_BIN/agy-tools"'), 'install.sh must link agy-tools');
       assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-tools.js" "$USER_BIN/antigravity-tools"'), 'install.sh must link antigravity-tools');
       assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-tokens.js" "$USER_BIN/agy-tokens"'), 'install.sh must link agy-tokens');
-      assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-tokens.js" "$USER_BIN/agy-dashboard"'), 'install.sh must link agy-dashboard');
+      assert(rawSh.includes('ln -sf "$ROOT_DIR/bin/agy-dashboard.js" "$USER_BIN/agy-dashboard"'), 'install.sh must link agy-dashboard');
 
       // Automated configure-statusline invocation
       assert(rawSh.includes('configure-statusline.js'), 'install.sh must invoke configure-statusline.js');
@@ -5455,10 +5455,16 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
             port: info.port,
             host: '127.0.0.1',
             method: 'OPTIONS',
-            path: '/events'
+            path: '/events',
+            headers: {
+              Origin: 'http://127.0.0.1'
+            }
           }, (res) => {
-            assert.strictEqual(res.headers['access-control-allow-origin'], '*');
+            assert.strictEqual(res.headers['access-control-allow-origin'], 'http://127.0.0.1');
             assert(res.headers['access-control-allow-methods'].includes('OPTIONS'));
+            assert.strictEqual(res.headers['x-content-type-options'], 'nosniff');
+            assert.strictEqual(res.headers['x-frame-options'], 'DENY');
+            assert.strictEqual(res.headers['vary'], 'Origin');
             resolve(res.statusCode);
           });
           req.on('error', reject);
@@ -5468,6 +5474,78 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
       } finally {
         await serve.stopDashboardServer(info.server);
       }
+    });
+
+    await test('dashboard server should reject unauthorized Host header with 403 Forbidden', async () => {
+      const http = require('http');
+      const info = await serve.startDashboardServer({ port: 0, idleTimeoutMs: 10000 });
+      try {
+        const status = await new Promise((resolve, reject) => {
+          const req = http.request({
+            port: info.port,
+            host: '127.0.0.1',
+            method: 'GET',
+            path: '/',
+            headers: {
+              Host: 'evil.com'
+            }
+          }, (res) => {
+            resolve(res.statusCode);
+          });
+          req.on('error', reject);
+          req.end();
+        });
+        assert.strictEqual(status, 403);
+      } finally {
+        await serve.stopDashboardServer(info.server);
+      }
+    });
+
+    await test('dashboard server should reject unauthorized Origin header with 403 Forbidden', async () => {
+      const http = require('http');
+      const info = await serve.startDashboardServer({ port: 0, idleTimeoutMs: 10000 });
+      try {
+        const status = await new Promise((resolve, reject) => {
+          const req = http.request({
+            port: info.port,
+            host: '127.0.0.1',
+            method: 'GET',
+            path: '/data.json',
+            headers: {
+              Origin: 'http://malicious-website.com'
+            }
+          }, (res) => {
+            resolve(res.statusCode);
+          });
+          req.on('error', reject);
+          req.end();
+        });
+        assert.strictEqual(status, 403);
+      } finally {
+        await serve.stopDashboardServer(info.server);
+      }
+    });
+
+    await test('isAllowedOrigin and isAuthorizedHost validate loopback and null origins securely', () => {
+      assert.strictEqual(serve.isAllowedOrigin('null'), true);
+      assert.strictEqual(serve.isAllowedOrigin('http://localhost'), true);
+      assert.strictEqual(serve.isAllowedOrigin('http://localhost:8787'), true);
+      assert.strictEqual(serve.isAllowedOrigin('http://127.0.0.1'), true);
+      assert.strictEqual(serve.isAllowedOrigin('http://127.0.0.1:9999'), true);
+      assert.strictEqual(serve.isAllowedOrigin('https://localhost'), false);
+      assert.strictEqual(serve.isAllowedOrigin('http://evil.com'), false);
+      assert.strictEqual(serve.isAllowedOrigin('http://localhost.evil.com'), false);
+      assert.strictEqual(serve.isAllowedOrigin(''), false);
+      assert.strictEqual(serve.isAllowedOrigin(null), false);
+
+      assert.strictEqual(serve.isAuthorizedHost('127.0.0.1'), true);
+      assert.strictEqual(serve.isAuthorizedHost('127.0.0.1:8787'), true);
+      assert.strictEqual(serve.isAuthorizedHost('localhost'), true);
+      assert.strictEqual(serve.isAuthorizedHost('localhost:8787'), true);
+      assert.strictEqual(serve.isAuthorizedHost('evil.com'), false);
+      assert.strictEqual(serve.isAuthorizedHost('evil.com:8787'), false);
+      assert.strictEqual(serve.isAuthorizedHost(''), false);
+      assert.strictEqual(serve.isAuthorizedHost(null), false);
     });
   });
 
@@ -5938,6 +6016,170 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
       assert(typeof geminiQuota.triggerBackgroundQuotaRefresh === 'function');
       const spawned = geminiQuota.triggerBackgroundQuotaRefresh();
       assert(typeof spawned === 'boolean');
+    });
+  });
+
+  // --- Suite 29: Statusline 5h/7d Real-Time Update & Token Recovery Validations ---
+  await describe('29. Statusline 5h/7d Real-Time Update & Token Recovery Validations', async () => {
+    await test('savePersistedLsToken and readPersistedLsToken persist valid token and reject invalid UUIDs', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-ls-tok-test-'));
+      const testTokFile = path.join(tempDir, '.ls_token.json');
+      try {
+        const validUuid = '12345678-1234-1234-1234-123456789abc';
+        // Reject invalid UUID
+        assert.strictEqual(geminiQuota.savePersistedLsToken({ csrfToken: 'not-a-uuid' }, testTokFile), false);
+        assert.strictEqual(geminiQuota.readPersistedLsToken(testTokFile), null);
+
+        // Accept and persist valid UUID
+        const saved = geminiQuota.savePersistedLsToken({
+          pid: 4321,
+          port: 57994,
+          ports: [57995, 57994],
+          csrfToken: validUuid
+        }, testTokFile);
+        assert.strictEqual(saved, true);
+        assert(fs.existsSync(testTokFile));
+
+        const read = geminiQuota.readPersistedLsToken(testTokFile);
+        assert(read !== null);
+        assert.strictEqual(read.pid, 4321);
+        assert.strictEqual(read.port, 57994);
+        assert.deepStrictEqual(read.ports, [57995, 57994]);
+        assert.strictEqual(read.csrfToken, validUuid);
+        assert(typeof read.updatedAt === 'number' && read.updatedAt > 0);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('applyTurnUsageToQuota deducts subsequent turns in real-time from 5h and 7d quotas', () => {
+      const snapshotTime = Date.now() - 60000; // snapshot 1 min ago
+      const initialQuota = {
+        timestampMs: snapshotTime,
+        quota5h: {
+          remainPercent: 90,
+          remainingFraction: 0.90,
+          resetTime: new Date(Date.now() + 3600000).toISOString(),
+          resetFormatted: '1h',
+          window: '5h'
+        },
+        quota7d: {
+          remainPercent: 60,
+          remainingFraction: 0.60,
+          resetTime: new Date(Date.now() + 86400000).toISOString(),
+          resetFormatted: '1d',
+          window: 'weekly'
+        },
+        remainPercent: 90
+      };
+
+      // Turn 1: 1M tokens executed 30 seconds after snapshot
+      // 1M on 20M limit (5h) = 5% deduction -> 90% - 5% = 85%
+      // 1M on 150M limit (7d) = 0.667% deduction -> 60% - 1% = 59%
+      const mockSessions = [
+        {
+          sessionId: 's1',
+          turns: [
+            { createdAt: new Date(snapshotTime - 10000).toISOString(), totalTokens: 500000 },
+            { createdAt: new Date(snapshotTime + 30000).toISOString(), totalTokens: 1000000 }
+          ]
+        }
+      ];
+
+      const adjusted = geminiQuota.applyTurnUsageToQuota(initialQuota, mockSessions, {
+        now: Date.now(),
+        quota: { limit5h: 20000000, limit7d: 150000000 }
+      });
+
+      assert.strictEqual(adjusted.quota5h.remainPercent, 85);
+      assert.strictEqual(adjusted.quota7d.remainPercent, 59);
+      assert.strictEqual(adjusted.remainPercent, 85);
+      assert.strictEqual(initialQuota.quota5h.remainPercent, 90);
+    });
+
+    await test('applyTurnUsageToQuota replenishes quota to 100% when resetTime has elapsed', () => {
+      const snapshotTime = Date.now() - 3600000; // snapshot 1h ago
+      const expiredQuota = {
+        timestampMs: snapshotTime,
+        quota5h: {
+          remainPercent: 50,
+          remainingFraction: 0.50,
+          resetTime: new Date(Date.now() - 60000).toISOString(), // reset 1m ago
+          resetFormatted: '0s',
+          window: '5h'
+        },
+        quota7d: {
+          remainPercent: 30,
+          remainingFraction: 0.30,
+          resetTime: new Date(Date.now() + 3600000).toISOString(), // not yet reset
+          resetFormatted: '1h',
+          window: 'weekly'
+        },
+        remainPercent: 50
+      };
+
+      const adjusted = geminiQuota.applyTurnUsageToQuota(expiredQuota, [], { now: Date.now() });
+      assert.strictEqual(adjusted.quota5h.remainPercent, 100, '5h quota must replenish to 100% after resetTime passes');
+      assert.strictEqual(adjusted.quota7d.remainPercent, 30, '7d quota must remain unreset before its resetTime');
+    });
+
+    await test('resolveCsrfTokenFallback recovers token from persisted cache on matching live server', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-fb-test-'));
+      const testTokFile = path.join(tempDir, '.ls_token.json');
+      const validUuid = 'abcdef01-2345-6789-abcd-ef0123456789';
+      try {
+        geminiQuota.savePersistedLsToken({
+          pid: 9999,
+          port: 48000,
+          ports: [48000, 48001],
+          csrfToken: validUuid
+        }, testTokFile);
+
+        const discovery = {
+          pid: 9999,
+          port: 48000,
+          ports: [48000, 48001],
+          csrfToken: ''
+        };
+
+        const resolved = geminiQuota.resolveCsrfTokenFallback(discovery, { tokenFilePath: testTokFile });
+        assert.strictEqual(resolved.csrfToken, validUuid);
+        assert.strictEqual(resolved.tokenSource, 'persisted_cache');
+        assert.strictEqual(resolved.pinnedProtocol, 'https');
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    await test('handlePostInvocation applies dynamic turn adjustments into badge output', async () => {
+      const snapshotTime = Date.now() - 10000;
+      const cached = {
+        timestampMs: snapshotTime,
+        isLive: true,
+        isFresh: true,
+        isStale: false,
+        quota5h: { remainPercent: 95, remainingFraction: 0.95, window: '5h' },
+        quota7d: { remainPercent: 70, remainingFraction: 0.70, window: 'weekly' },
+        remainPercent: 95
+      };
+
+      // 2M tokens on 20M limit = 10% deduction -> 95% - 10% = 85%
+      const sessions = [
+        {
+          sessionId: 'test-sess',
+          turns: [
+            { createdAt: new Date(snapshotTime + 5000).toISOString(), totalTokens: 2000000, costUsd: 0.001 }
+          ]
+        }
+      ];
+
+      const res = await hookHandler.handlePostInvocation({
+        sessions,
+        geminiQuota: cached,
+        quota: { limit5h: 20000000, limit7d: 150000000 }
+      });
+
+      assert(res.badge.includes('85%'), `Badge must reflect real-time 85% instead of frozen 95%, got: ${res.badge}`);
     });
   });
 
