@@ -37,10 +37,15 @@ tools:
    - Unpinned or outdated base container images (`latest` tag usage).
 
 ## 3. Reporting Requirements
-- Severity (🔴 CRITICAL, 🟠 HIGH, 🟡 MEDIUM, 🟢 LOW)
-- Exact file path and line number
-- Cloud / IaC Policy Name
-- Risk of exploit
+For every finding reported to `security-reviewer`, MUST include:
+- **Severity**: 🔴 CRITICAL | 🟠 HIGH | 🟡 MEDIUM | 🟢 LOW
+- **Category**: OWASP / CIS / CWE Mapping (e.g., `A05:2021 - Security Misconfiguration`, `A01:2021 - Broken Access Control`)
+- **Location**: `path/to/file:line` or manifest resource block
+- **Attacker Tier**: Anonymous external | Authenticated user | Insider / compromised account | Supply chain (name weakest tier that can exploit this)
+- **Cloud / IaC Policy**: Policy name or violated configuration rule
+- **Exploit Scenario / PoC**: Concrete description of how an attacker exploits the misconfiguration or over-privileged policy
+- **Impact**: Real-world cloud blast-radius and security consequence
+- **Detection Telemetry** (🔴/🟠 only): Defender signal during exploitation (`detectable: <signal>` vs `no detection: <gap>`)
 - **Suggested Remediation (Code Diff)**:
   ```diff
   - member: "allUsers"

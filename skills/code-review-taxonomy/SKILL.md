@@ -13,7 +13,7 @@ description: >
 
 ## 1. Purpose
 
-This skill is Stage 1 of the code-reviewer 4-stage pipeline. It turns a raw diff into normalized, severity-rated findings the rest of the pipeline can filter and count. It prevents the 12 most common semantic-review failures:
+This skill is Stage 1 of the code-reviewer 4-stage pipeline. It turns a raw diff into normalized, severity-rated findings the rest of the pipeline can filter and count. It prevents the 13 most common semantic-review failures:
 
 1. **Duplicating Stage 0**: re-running build/lint/type/test checks the deterministic scan already covered.
 2. **Context creep**: reviewing unchanged files and flooding output with pre-existing issues.
@@ -27,10 +27,13 @@ This skill is Stage 1 of the code-reviewer 4-stage pipeline. It turns a raw diff
 10. **Category drift**: labeling a data-loss bug as "style" because the diff touched formatting.
 11. **Lockfile noise**: findings on vendored, generated, or lock files.
 12. **Verdict shopping**: re-scanning with loosened rules until the count reads zero.
+13. **Bikeshedding**: reporting style, formatting, or naming issues the Stage 0 linter or formatter already flags, or proposing personal-preference refactors that match existing codebase conventions. Not a finding; spend the review budget on correctness.
 
 ## 2. Scope & Boundaries
 
 - **Read-only**: findings and recommendations only. Never edit, never commit. Fixes route back to developer or coding agents.
+- **Diff Scope Guard**: If the diff exceeds one rigorous pass (guide: more than 50 files or 2000 changed lines), stop and report that the scope needs splitting instead of shallow-passing.
+- **Intent Conformance**: The delegation payload carries the change's purpose and success criteria. Enumerate each criterion and verify the diff implements it. Missing or partial required logic is a correctness finding at P1: absent logic outranks wrong logic. If the payload carries no intent statement, note "No intent statement provided; omission check skipped."
 - **Changed files only**: findings attach to added/modified lines in the diff. Unchanged code is context, never a finding target.
 - **Auto-skip**: vendored code, generated code, lockfiles, minified assets. List them under "Skipped" in the report, never review them.
 - **Stage separation**: Stage 0 (quality-gate, scoped to QG-01/02/03/04/10/12/13 + QG-14) owns deterministic checks. This stage owns semantic judgment. Do not re-run builds, tests, lint, or formatters.
@@ -45,7 +48,7 @@ Every finding lands in exactly one category. Pick by defect, not by the file's d
 | 1 | correctness | Logic errors, off-by-one, inverted conditions, wrong operators, dead branches, broken invariants, API contract misuse, wrong return handling |
 | 2 | security | Injection, broken authn/authz, secret exposure, unsafe deserialization, path traversal, SSRF, crypto misuse, missing input validation on trust boundaries |
 | 3 | stability | Crash paths, unhandled errors/panics, race conditions, deadlocks, resource leaks, missing awaits, unhandled rejections, lifecycle misuse (init/build/dispose) |
-| 4 | data-integrity | Validation gaps, transaction boundaries, migration safety, idempotency, partial-failure data loss, type/coercion mismatches at storage or API boundaries |
+| 4 | data-integrity | Validation gaps, transaction boundaries, migration safety, idempotency, partial-failure data loss, type/coercion mismatches at storage or API boundaries, backward compatibility (breaking public API request/response shapes, rollback-unsafe database migrations) |
 | 5 | performance | Superlinear complexity, N+1 queries, needless allocations/copies, blocking I/O on hot paths, unbounded growth, missing pagination |
 | 6 | maintainability | Dead code, duplicated logic, oversized functions, leaky abstractions, names/structure that hide intent |
 | 7 | test-coverage | Changed logic without tests, missing edge cases (empty/null/max/concurrency), assertions that cannot fail, mocks that mirror the implementation |
@@ -84,14 +87,15 @@ Caps: max 89 without tracing the exact path. Reserve 95-100 for diff-alone proof
 
 ## 7. Scan Procedure
 
-1. Load the diff: orchestrator payload or `git diff <base>...HEAD`. Enumerate changed files; auto-skip the §2 list.
-2. For each remaining file, read the diff hunks plus surrounding context (about ±20 lines where needed).
-3. Run all 8 category lenses over each hunk. Record every candidate as a finding record (§8).
-4. Assign severity (§4) and confidence (§5) to each candidate.
-5. Set `handoff` per §6 for security-category records.
-6. Deduplicate: same root cause becomes one finding, keeping the highest severity; note merged IDs.
-7. Order output P0 first, then P1, P2, P3; within a severity, by confidence descending.
-8. Emit the Stage 1 report (§9). Stop. No fixes, no commits, no re-scans.
+1. **Scope & Intent Check**: Verify diff against Diff Scope Guard (>50 files or >2000 lines triggers split recommendation). Verify intent conformance against the delegation payload criteria; mark missing requirements as P1 correctness findings.
+2. Load the diff: orchestrator payload or `git diff <base>...HEAD`. Enumerate changed files; auto-skip the §2 list.
+3. For each remaining file, read the diff hunks plus surrounding context (about ±20 lines where needed). When the diff changes a public contract (exported signature, interface, event or message name, config key, schema field, default value), search (e.g. `grep_search`) the repository for all callers and usages; a caller the diff breaks is a finding attributed to the diff hunk.
+4. Run all 8 category lenses over each hunk. Record every candidate as a finding record (§8).
+5. Assign severity (§4) and confidence (§5) to each candidate.
+6. Set `handoff` per §6 for security-category records.
+7. Deduplicate: same root cause becomes one finding, keeping the highest severity; note merged IDs.
+8. Order output P0 first, then P1, P2, P3; within a severity, by confidence descending.
+9. Emit the Stage 1 report (§9). Stop. No fixes, no commits, no re-scans.
 
 ## 8. Finding Record Schema
 

@@ -36,9 +36,14 @@ tools:
 - **Rule**: Dummy tokens, mock values, or obvious sample keys located inside test directories (`test/**`, `tests/**`, `__tests__/**`, `__mocks__/**`, `*.test.*`, `*.spec.*`) MUST NOT be flagged as 🔴 CRITICAL or 🟠 HIGH unless they contain real, production-formatted valid credentials.
 
 ## 4. Reporting Requirements
-- Severity (🔴 CRITICAL, 🟠 HIGH, 🟡 MEDIUM, 🟢 LOW)
-- Exact file path and line number
-- Secret Type & Masked Sample (e.g., `sk-ant-api03-...[REDACTED]`)
+For every finding reported to `security-reviewer`, MUST include:
+- **Severity**: 🔴 CRITICAL | 🟠 HIGH | 🟡 MEDIUM | 🟢 LOW
+- **Category**: OWASP / CWE ID (e.g., `A07:2021 - Identification and Authentication Failures (CWE-798)`)
+- **Location**: `path/to/file:line`
+- **Attacker Tier**: Anonymous external | Authenticated user | Insider / compromised account | Supply chain (name weakest tier that can exploit this)
+- **Secret Type & Masked Sample**: e.g., `Gemini API Key: AIzaSyD...[REDACTED]`
+- **Impact**: Real-world credential exposure and blast-radius consequence
+- **Detection Telemetry** (🔴/🟠 only): Defender signal during exploitation (`detectable: <signal>` vs `no detection: <gap>`)
 - **Suggested Remediation (Code Diff)** demonstrating secure environment variable loading:
   ```diff
   - const apiKey = "AIzaSyD...";

@@ -36,10 +36,15 @@ tools:
    - Insecure deserialization patterns (`pickle.loads`, unsafe YAML/JSON loaders).
 
 ## 3. Reporting Requirements
-- Severity (🔴 CRITICAL, 🟠 HIGH, 🟡 MEDIUM, 🟢 LOW)
-- Exact file path and line number
-- Vulnerable package or MCP configuration key
-- Exploit scenario
+For every finding reported to `security-reviewer`, MUST include:
+- **Severity**: 🔴 CRITICAL | 🟠 HIGH | 🟡 MEDIUM | 🟢 LOW
+- **Category**: OWASP / CWE ID (e.g., `A06:2021 - Vulnerable and Outdated Components`, `A04:2021 - Insecure Design`)
+- **Location**: `path/to/manifest:line` or MCP configuration key
+- **Attacker Tier**: Anonymous external | Authenticated user | Insider / compromised account | Supply chain (name weakest tier that can exploit this)
+- **Vulnerable Component / MCP Key**: Package name, version, or MCP server property
+- **Exploit Scenario / PoC**: Concrete description of how an attacker exploits the dependency CVE or excessive MCP permissions
+- **Impact**: Real-world supply-chain, host, or agentic blast-radius consequence
+- **Detection Telemetry** (🔴/🟠 only): Defender signal during exploitation (`detectable: <signal>` vs `no detection: <gap>`)
 - **Suggested Remediation (Code Diff)**:
   ```diff
   - "lodash": "4.17.15"
