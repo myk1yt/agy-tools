@@ -4117,45 +4117,51 @@ async function runAllTests() {
         source: 'language_server'
       };
 
-      const badgeStr = formatter.renderRealTimeBadge({
-        turnTokens: 1500,
-        turnCostUsd: 0.001,
-        todayTokens: 25000,
-        todayCostUsd: 0.02,
-        cacheHitRate: 80,
-        isFree: false,
-        geminiQuota: liveQuota
-      }, 'usd', false);
+      const prevCols = process.env.COLUMNS;
+      process.env.COLUMNS = '200';
+      try {
+        const badgeStr = formatter.renderRealTimeBadge({
+          turnTokens: 1500,
+          turnCostUsd: 0.001,
+          todayTokens: 25000,
+          todayCostUsd: 0.02,
+          cacheHitRate: 80,
+          isFree: false,
+          geminiQuota: liveQuota
+        }, 'usd', false);
 
-      assert(badgeStr.includes('5h:'), `Badge must include '5h:', got: ${badgeStr}`);
-      assert(!badgeStr.includes('Gemini 5h:'), `Badge must not include 'Gemini 5h:', got: ${badgeStr}`);
-      assert(badgeStr.includes('79%'), 'Badge must include 79% for 5h quota');
-      assert(badgeStr.includes('4h 10m'), 'Badge must include 4h 10m countdown');
-      assert(badgeStr.includes('7d:'), `Badge must include '7d:', got: ${badgeStr}`);
-      assert(badgeStr.includes('21%'), 'Badge must include 21% for 7d quota');
-      assert(badgeStr.includes('3d 20h'), 'Badge must include 3d 20h countdown');
+        assert(badgeStr.includes('5h:'), `Badge must include '5h:', got: ${badgeStr}`);
+        assert(!badgeStr.includes('Gemini 5h:'), `Badge must not include 'Gemini 5h:', got: ${badgeStr}`);
+        assert(badgeStr.includes('79%'), 'Badge must include 79% for 5h quota');
+        assert(badgeStr.includes('4h 10m'), 'Badge must include 4h 10m countdown');
+        assert(badgeStr.includes('7d:'), `Badge must include '7d:', got: ${badgeStr}`);
+        assert(badgeStr.includes('21%'), 'Badge must include 21% for 7d quota');
+        assert(badgeStr.includes('3d 20h'), 'Badge must include 3d 20h countdown');
 
-      // Fallback rendering when geminiQuota is null
-      const fallbackBadge = formatter.renderRealTimeBadge({
-        turnTokens: 1500,
-        turnCostUsd: 0.001,
-        todayTokens: 25000,
-        todayCostUsd: 0.02,
-        cacheHitRate: 80,
-        isFree: false,
-        geminiQuota: null,
-        rollingUsage: {
-          remain5hPercent: 95,
-          remain7dPercent: 90,
-          tokens5h: 1000,
-          limit5h: 20000000,
-          tokens7d: 5000,
-          limit7d: 150000000
-        }
-      }, 'usd', false);
+        // Fallback rendering when geminiQuota is null
+        const fallbackBadge = formatter.renderRealTimeBadge({
+          turnTokens: 1500,
+          turnCostUsd: 0.001,
+          todayTokens: 25000,
+          todayCostUsd: 0.02,
+          cacheHitRate: 80,
+          isFree: false,
+          geminiQuota: null,
+          rollingUsage: {
+            remain5hPercent: 95,
+            remain7dPercent: 90,
+            tokens5h: 1000,
+            limit5h: 20000000,
+            tokens7d: 5000,
+            limit7d: 150000000
+          }
+        }, 'usd', false);
 
-      assert(fallbackBadge.includes('5시간') || fallbackBadge.includes('5h'), 'Fallback badge must include rolling usage');
-      assert(fallbackBadge.includes('95%'), 'Fallback badge must include 5h percent');
+        assert(fallbackBadge.includes('5시간') || fallbackBadge.includes('5h'), 'Fallback badge must include rolling usage');
+        assert(fallbackBadge.includes('95%'), 'Fallback badge must include 5h percent');
+      } finally {
+        if (prevCols === undefined) delete process.env.COLUMNS; else process.env.COLUMNS = prevCols;
+      }
     });
 
     await test('htmlReport payload and client script should include Gemini 5h and 7d quota live cards and indicator', () => {
@@ -6389,6 +6395,178 @@ agy      1234 user    5u  IPv4 0xbaadf00d      0t0  TCP 127.0.0.1:54457 (LISTEN)
 
       const son46 = config.getModelPricing('sonnet-4.6');
       assert.strictEqual(son46.id, 'claude-sonnet-4.6');
+    });
+  });
+
+  // --- Suite 31: Adaptive Responsive Statusline Terminal Layout ---
+  await describe('31. Adaptive Responsive Statusline Terminal Layout', async () => {
+    const fixtureBadgeData = (stale = false) => ({
+      turnTokens: 564,
+      turnCostUsd: 0.0003,
+      todayTokens: 123100,
+      todayCostUsd: 0.047,
+      cacheHitRate: 89,
+      geminiQuota: {
+        remainPercent: 97,
+        isFresh: !stale,
+        lastError: stale ? { kind: 'auth_failure', detail: 'HTTP 401' } : undefined,
+        quota5h: { remainPercent: 97, resetFormatted: '4h 44m', window: '5h' },
+        quota7d: { remainPercent: 61, resetFormatted: '9h 25m', window: 'weekly' }
+      }
+    });
+
+    await test('Wide (Full) Mode is rendered when width >= 115 columns (has mini-bar ▰ and countdown timer)', () => {
+      const data = fixtureBadgeData(false);
+      // Width = 120 (Wide mode)
+      const badge120 = formatter.renderRealTimeBadge(data, 'usd', false, '📊 Dashboard', { width: 120 });
+      const plain120 = formatter.stripAnsi(badge120);
+      assert(plain120.includes('▰'), 'Wide mode at width 120 must include mini progress bar ▰');
+      assert(plain120.includes('4h 44m'), 'Wide mode at width 120 must include 5h reset countdown (4h 44m)');
+      assert(plain120.includes('9h 25m'), 'Wide mode at width 120 must include 7d reset countdown (9h 25m)');
+      assert(plain120.includes('5h:'), 'Wide mode must include 5h label');
+      assert(plain120.includes('7d:'), 'Wide mode must include 7d label');
+
+      // Boundary width = 115 (Wide mode threshold)
+      const badge115 = formatter.renderRealTimeBadge(data, 'usd', false, '📊 Dashboard', { width: 115 });
+      const plain115 = formatter.stripAnsi(badge115);
+      assert(plain115.includes('▰'), 'Wide mode at boundary 115 must include mini progress bar');
+      assert(plain115.includes('4h 44m'), 'Wide mode at boundary 115 must include countdown');
+    });
+
+    await test('Compact Mode is rendered when width < 115 columns (omits mini-bar and countdown, preserves full labels)', () => {
+      const data = fixtureBadgeData(false);
+      // Boundary width = 114 (Compact mode threshold)
+      const badge114 = formatter.renderRealTimeBadge(data, 'usd', false, '📊 Dashboard', { width: 114 });
+      const plain114 = formatter.stripAnsi(badge114);
+
+      // Omits mini-bars and countdown strings
+      assert(!plain114.includes('▰') && !plain114.includes('▱'), 'Compact mode must omit mini progress bars');
+      assert(!plain114.includes('4h 44m'), 'Compact mode must omit 5h countdown string');
+      assert(!plain114.includes('9h 25m'), 'Compact mode must omit 7d countdown string');
+
+      // Preserves full readable labels (never ultra-minimal abbreviations like T:, Tod:, C:)
+      const i18nTurn = i18n.t('hookBadgeTurn');
+      const i18nToday = i18n.t('hookBadgeToday');
+      const i18nCache = i18n.t('hookBadgeCache');
+      assert(plain114.includes(`${i18nTurn}:`), 'Compact mode must preserve full Turn label');
+      assert(plain114.includes(`${i18nToday}:`), 'Compact mode must preserve full Today label');
+      assert(plain114.includes(`${i18nCache}:`), 'Compact mode must preserve full Cache label');
+      assert(plain114.includes('5h:'), 'Compact mode must preserve 5h label');
+      assert(plain114.includes('7d:'), 'Compact mode must preserve 7d label');
+      assert(plain114.includes('97%'), 'Compact mode must preserve 5h percentage');
+      assert(plain114.includes('61%'), 'Compact mode must preserve 7d percentage');
+      assert(plain114.includes('📊 Dashboard'), 'Compact mode must preserve Dashboard link');
+
+      // No cryptic abbreviations
+      assert(!plain114.includes('T: ') && !plain114.includes('Tod: ') && !plain114.includes('C: '), 'Compact mode must not use ultra-minimal abbreviations');
+    });
+
+    await test('Compact Mode preserves ⚡ emoji, cost metrics, and staleness markers', () => {
+      const staleData = fixtureBadgeData(true);
+      const badge = formatter.renderRealTimeBadge(staleData, 'usd', false, '📊 Dashboard', { width: 100 });
+      const plain = formatter.stripAnsi(badge);
+
+      assert(plain.startsWith('⚡'), 'Compact mode must preserve ⚡ leading emoji');
+      assert(plain.includes('564'), 'Compact mode must preserve turn tokens');
+      assert(plain.includes('123.1k'), 'Compact mode must preserve today tokens');
+      assert(plain.includes('$0.0003'), 'Compact mode must preserve turn cost');
+      assert(plain.includes('$0.047'), 'Compact mode must preserve today cost');
+      assert(plain.includes('97%!'), 'Compact mode must preserve staleness marker (!) on 5h');
+      assert(plain.includes('61%!'), 'Compact mode must preserve staleness marker (!) on 7d');
+    });
+
+    await test('Statusline wraps into at most 2 physical lines at width 75–80 without clipping any segment', () => {
+      const data = fixtureBadgeData(false);
+      // Width = 80
+      const badge80 = formatter.renderRealTimeBadge(data, 'usd', false, '📊 Dashboard', { width: 80 });
+      const lines80 = badge80.split('\n');
+      assert.strictEqual(lines80.length, 2, 'Compact badge at width 80 must wrap into exactly 2 lines');
+      for (const line of lines80) {
+        const w = formatter.getBadgeVisibleWidth(line);
+        assert(w <= 80, `Line width ${w} must be <= 80: ${JSON.stringify(line)}`);
+      }
+      assert(!badge80.includes('…'), 'No segment should be truncated at width 80');
+
+      // Width = 75
+      const badge75 = formatter.renderRealTimeBadge(data, 'usd', false, '📊 Dashboard', { width: 75 });
+      const lines75 = badge75.split('\n');
+      assert.strictEqual(lines75.length, 2, 'Compact badge at width 75 must wrap into exactly 2 lines');
+      for (const line of lines75) {
+        const w = formatter.getBadgeVisibleWidth(line);
+        assert(w <= 75, `Line width ${w} must be <= 75: ${JSON.stringify(line)}`);
+      }
+      assert(!badge75.includes('…'), 'No segment should be truncated at width 75');
+    });
+
+    await test('resolveBadgeWidth multi-fallback hierarchy and probeConsoleDeviceColumns', () => {
+      const prevCols = process.env.COLUMNS;
+      try {
+        // Priority 1: process.env.COLUMNS
+        process.env.COLUMNS = '88';
+        assert.strictEqual(formatter.resolveBadgeWidth(), 88);
+
+        delete process.env.COLUMNS;
+        const origStdoutTTY = process.stdout ? process.stdout.isTTY : undefined;
+        const origStdoutCols = process.stdout ? process.stdout.columns : undefined;
+        const origStderrTTY = process.stderr ? process.stderr.isTTY : undefined;
+        const origStderrCols = process.stderr ? process.stderr.columns : undefined;
+
+        try {
+          // Priority 2: process.stdout.columns when isTTY is true
+          if (process.stdout) {
+            Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+            Object.defineProperty(process.stdout, 'columns', { value: 105, configurable: true });
+            assert.strictEqual(formatter.resolveBadgeWidth(), 105);
+          }
+
+          // Priority 3: process.stdout.isTTY === false -> Infinity (REQ-1f)
+          if (process.stdout) {
+            Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
+            assert.strictEqual(formatter.resolveBadgeWidth(), Infinity);
+          }
+
+          // Priority 4: fallback to stderr when stdout.isTTY is undefined
+          if (process.stdout && process.stderr) {
+            Object.defineProperty(process.stdout, 'isTTY', { value: undefined, configurable: true });
+            Object.defineProperty(process.stderr, 'isTTY', { value: true, configurable: true });
+            Object.defineProperty(process.stderr, 'columns', { value: 92, configurable: true });
+            assert.strictEqual(formatter.resolveBadgeWidth(), 92);
+          }
+        } finally {
+          if (process.stdout) {
+            Object.defineProperty(process.stdout, 'isTTY', { value: origStdoutTTY, configurable: true });
+            Object.defineProperty(process.stdout, 'columns', { value: origStdoutCols, configurable: true });
+          }
+          if (process.stderr) {
+            Object.defineProperty(process.stderr, 'isTTY', { value: origStderrTTY, configurable: true });
+            Object.defineProperty(process.stderr, 'columns', { value: origStderrCols, configurable: true });
+          }
+        }
+
+        // probeConsoleDeviceColumns direct function validation
+        assert(typeof formatter.probeConsoleDeviceColumns === 'function');
+        const probeResult = formatter.probeConsoleDeviceColumns();
+        assert(probeResult === null || (Number.isFinite(probeResult) && probeResult > 0));
+      } finally {
+        if (prevCols !== undefined) process.env.COLUMNS = prevCols;
+        else delete process.env.COLUMNS;
+      }
+    });
+
+    await test('renderRealTimeBadge supports explicit options overrides (mode and width)', () => {
+      const data = fixtureBadgeData(false);
+      // Explicit mode: 'compact' at wide width 200
+      const forcedCompact = formatter.renderRealTimeBadge(data, 'usd', false, null, { mode: 'compact', width: 200 });
+      assert(!forcedCompact.includes('▰'), 'Forced compact must omit mini progress bar even at width 200');
+      assert(!forcedCompact.includes('4h 44m'), 'Forced compact must omit countdown');
+
+      // Explicit mode: 'wide' at narrow width 80
+      const forcedWide = formatter.renderRealTimeBadge(data, 'usd', false, null, { mode: 'wide', width: 80 });
+      assert(forcedWide.includes('▰'), 'Forced wide must include mini progress bar even at width 80');
+
+      // Numeric width argument shorthand
+      const numericArgCompact = formatter.renderRealTimeBadge(data, 'usd', false, null, 90);
+      assert(!numericArgCompact.includes('▰'), 'Numeric width 90 must select compact layout');
     });
   });
 
