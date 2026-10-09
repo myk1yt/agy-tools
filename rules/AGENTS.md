@@ -119,7 +119,7 @@ For Medium and Large initiatives, maintain an append-only `decisions.md` in the 
 
 ### 5.2 Safe Execution & Platform Portability
 - **Deletion Safety**: Permanent deletion (`rm -rf`, `Remove-Item -Recurse -Force`, `del /s /q`) is strictly forbidden. Move files to the recycle bin.
-- **Protected Paths**: Never modify, delete, or rename VCS metadata (`.git`), global configurations (`~/.gemini`), AppData, or dependency directories.
+- **Protected Paths vs Governance Reconciliation**: VCS metadata (`.git`), AppData, and third-party dependencies are strictly protected from modification, deletion, or renaming. Workspace edits to `.gemini/**` are restricted strictly to master governance synchronization scripts (`configure-rules.js`, `configure-customizations.js`). Direct ad-hoc edits to `.gemini/**` are prohibited.
 - **Windows / OneDrive Survival**: On file-lock errors, apply exponential backoff (500ms $\to$ 1000ms $\to$ 2000ms). Robocopy exit codes 0–7 represent success.
 
 ---

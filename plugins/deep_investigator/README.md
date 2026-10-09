@@ -41,11 +41,32 @@ An empirical research and systems-level verification plugin for Google Antigravi
 ## 🛠️ Included Components
 
 - **Agent**: `deep-investigator` (`plugins/deep_investigator/agents/deep-investigator/agent.md`)
-  - Standalone and subagent executable.
+  - Standalone and subagent executable with `commandExecutionPolicy: ask_user`.
   - Excludes all write/edit tools (`write_to_file`, `replace_file_content`), ensuring strictly non-destructive inspection.
+  - `run_command` is bounded to non-destructive CLI introspection; arbitrary binary execution and mutating redirections are forbidden.
 - **Skill**: `deep-investigator` (`plugins/deep_investigator/skills/deep-investigator/SKILL.md`)
-  - Complete verification playbooks, compiler recipe commands, sandboxing XML patterns, and report schemas.
+  - Complete verification playbooks, hardened XML sandboxing with nonces/CDATA sanitization, cross-platform introspection commands, and report schemas.
 - **Configuration**: `plugin.json` (`plugins/deep_investigator/plugin.json`)
+
+---
+
+## 🔒 Security Model & Execution Boundaries
+
+Deep Investigator enforces a strict non-destructive security model designed for zero-trust environments:
+
+1. **Hardware Read-Only & Policy Enforcement**:
+   - `commandExecutionPolicy: ask_user`: CLI command invocations require user approval.
+   - Exclusion of write/edit tools (`write_to_file`, `replace_file_content`).
+2. **Command Execution Boundaries (`run_command`)**:
+   - **Permitted**: Non-destructive CLI introspection (`--version`, `cl.exe /Bv`, `cargo check`, `npx tsc --noEmit`, syntax-only diagnostics `clang++ -fsyntax-only`).
+   - **Strictly Prohibited**: Shell output redirections (`>`, `>>`, `Out-File`, `Set-Content`), mutating commands, arbitrary binary compilation/executions (`./test`, `.exe`), and script execution.
+3. **Hardened Untrusted Web XML Sandboxing**:
+   - External content from `read_url_content` and `search_web` is wrapped in `<untrusted_web_source nonce="..." url="..." domain="...">` with dynamic nonces.
+   - **CDATA Delimiter Sanitization**: Escapes `]]>` delimiters (`]]]]><![CDATA[>` or `]] >`) to block prompt injection breakout attacks.
+   - **Argument Poisoning Prevention**: External web data is strictly passive text and must never be passed as CLI arguments or inputs to execution tools.
+4. **Cross-Platform Portability**:
+   - Introspection recipes supply platform-aware equivalents (Windows PowerShell `NUL | Select-String` alongside POSIX `/dev/null | grep`).
+   - Report templates use portable generic paths (`file:///path/to/reports/...`) with zero hardcoded developer paths.
 
 ---
 

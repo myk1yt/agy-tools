@@ -2,7 +2,7 @@
 **Document Version**: 1.0.0  
 **Date**: 2026-10-10  
 **Author**: Staff AI Systems Architecture Specialist (Subagent 1)  
-**Target Workspaces**: `D:\OneDrive\Projects\Antigravity-cli` & Global Config `C:\Users\k1yt\.gemini\config`
+**Target Workspaces**: `D:\OneDrive\Projects\Antigravity-cli` & Global Config `%USERPROFILE%\.gemini\config` (`~/.gemini/config`)
 
 ---
 

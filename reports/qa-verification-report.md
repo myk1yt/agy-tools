@@ -34,10 +34,10 @@ An independent double-blind verification was executed to validate the deployment
 - **Exit Code**: `0`
 - **Execution Log**:
   ```
-  [SUCCESS] Updated AGENTS.md in C:\Users\k1yt\.gemini\config\rules (backup: AGENTS.md.bak.20261010-062216)
-  [INFO] Rule GEMINI.md is identical in C:\Users\k1yt\.gemini\config\rules. Skipped.
+  [SUCCESS] Updated AGENTS.md in %USERPROFILE%\.gemini\config\rules (backup: AGENTS.md.bak.20261010-062216)
+  [INFO] Rule GEMINI.md is identical in %USERPROFILE%\.gemini\config\rules. Skipped.
   ```
-- **Verification**: `C:\Users\k1yt\.gemini\config\rules\AGENTS.md` matches `rules/AGENTS.md` (9,928 bytes, identical).
+- **Verification**: `%USERPROFILE%\.gemini\config\rules\AGENTS.md` matches `rules/AGENTS.md` (9,928 bytes, identical).
 
 ### 2.2 Customizations Deployment (`scripts/lib/configure-customizations.js`)
 - **Command**: `node scripts/lib/configure-customizations.js`
@@ -89,7 +89,7 @@ plugins/deep_investigator/
         └── SKILL.md
 ```
 
-### 4.2 Deployed Directory Audit (`C:\Users\k1yt\.gemini\config\plugins\deep_investigator\`)
+### 4.2 Deployed Directory Audit (`%USERPROFILE%\.gemini\config\plugins\deep_investigator\`)
 - **Manifest (`plugin.json`)**: Valid JSON. Version: `1.0.0`, Name: `deep_investigator`.
 - **Subagent Spec (`agents/deep-investigator/agent.md`)**:
   - Size: 10,525 bytes

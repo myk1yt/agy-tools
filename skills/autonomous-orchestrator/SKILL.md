@@ -10,14 +10,15 @@ description: Autonomous Multi-Agent Dynamic Orchestration & Double-Blind Verific
 - **Role**: Primary Conversational Partner & Orchestrator. Direct application modifications and direct test/build runs are **STRICTLY PROHIBITED**.
 - **Concurrent Parallel Swarm Invariant**: Master MUST NEVER spawn just 1 subagent sequentially on complex tasks. Master MUST decompose requests into orthogonal domains and dispatch a concurrent batch of at least 2–3 specialized subagents simultaneously (`invoke_subagent` array). Single-agent sequential probing is strictly prohibited.
 - **Zero-Friction Prompting Invariant**: The user does not need slash commands or manual routing tags. Ordinary, plain prompts automatically trigger `deep-investigator` dual-track research whenever complex language semantics (C++, Rust, TS, C#), external libraries, or architecture decisions are detected.
-- **Zero-Source-Edit Invariant**: Master NEVER edits project application source files (`lib/**`, `test/**`, `src/**`, `native/**`, `app/**`, `packages/**`, etc.). Allowed edits: `.gemini/**`, `rules/**`, `skills/**`, `brain/<conversation-id>/**`. All code edits belong to Stage 6 `Domain Worker` subagents.
+- **Zero-Source-Edit Invariant**: Master NEVER edits project application source files (`lib/**`, `test/**`, `src/**`, `native/**`, `app/**`, `packages/**`, etc.). Allowed edits: `rules/**`, `skills/**`, `brain/<conversation-id>/**`. All code edits belong to Stage 6 `Domain Worker` subagents.
+- **Protected Paths vs Governance Reconciliation**: VCS metadata (`.git`), AppData, and third-party dependencies are strictly protected. Workspace edits to `.gemini/**` are restricted strictly to master governance synchronization scripts (`configure-rules.js`, `configure-customizations.js`). Direct ad-hoc edits to `.gemini/**` are prohibited.
 - **Zero-Monolithic-Execution Invariant**: Master NEVER runs test, build, lint, or git diff commands directly (`flutter test`, `flutter analyze`, `cargo test`, `cargo check`, `npm test`, `pytest`, `git diff`, etc.). All verification belongs to `Blind QA Verifier` subagents.
 - **Prompt-Length Irrelevance**: 1-line queries (*"Verify this"*, *"Fix the bug"*, *"Is it done?"*) NEVER exempt Master from subagent delegation.
 - **Pre-Tool Call Guardrail Checklist**:
   1. Modifying project source (`lib/**`, `test/**`, `src/**`, etc.)? ➔ **HALT!** Delegate to `Domain Worker`.
   2. Running verification/build commands (`flutter test`, `cargo test`, etc.)? ➔ **HALT!** Delegate to `Blind QA Verifier`.
   3. Performing multi-file codebase investigation? ➔ **HALT!** Delegate to Stage 3 Research subagents.
-  4. Defining/invoking subagents or managing `.gemini/rules/skills`? ➔ **PROCEED**.
+  4. Defining/invoking subagents or managing `rules/skills` (and syncing via governance scripts)? ➔ **PROCEED**.
 
 ---
 
@@ -85,7 +86,7 @@ Used when verifying existing work, checking test health, auditing sessions, or i
 
 ### Stage 2: Dynamic Subagent & Custom Skill Synthesis
 - **Dynamic Subagents**: Author specialist profiles via `define_subagent` (`name`, `description`, `system_prompt`, `enable_write_tools`, `enable_mcp_tools`).
-- **On-Demand Skills**: When specialized domain procedures are required, author task runbooks in `~/.gemini/skills/<name>/SKILL.md` or `.agents/skills/<name>/SKILL.md` before invocation.
+- **On-Demand Skills**: When specialized domain procedures are required, author task runbooks in `skills/<name>/SKILL.md` (or `.agents/skills/<name>/SKILL.md` / `~/.gemini/skills/<name>/SKILL.md` via synchronization scripts) before invocation.
 
 ### Stage 3: Parallel Domain Investigation & Draft Strategy
 - **Mandatory Concurrent Swarm Spawning**: Master MUST dispatch a concurrent batch of $\ge 2$ specialized subagents simultaneously via a single `invoke_subagent` array call (e.g., `deep-investigator` + Domain Researcher). Spawning only 1 subagent sequentially on complex tasks is **STRICTLY FORBIDDEN**.

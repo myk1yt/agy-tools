@@ -247,7 +247,7 @@ We establish three triggering pathways:
 
 ## 4. Concrete Implementation Plan & Code Diffs
 
-### 4.1 Configuration Diff: `C:\Users\k1yt\.gemini\config\rules\AGENTS.md` (and `rules/AGENTS.md`)
+### 4.1 Configuration Diff: `%USERPROFILE%\.gemini\config\rules\AGENTS.md` (and `rules/AGENTS.md`)
 
 ```diff
 --- a/rules/AGENTS.md
@@ -311,7 +311,7 @@ We establish three triggering pathways:
 
 ---
 
-### 4.2 Configuration Diff: `C:\Users\k1yt\.gemini\config\skills\autonomous-orchestrator\SKILL.md` (and `skills/autonomous-orchestrator/SKILL.md`)
+### 4.2 Configuration Diff: `%USERPROFILE%\.gemini\config\skills\autonomous-orchestrator\SKILL.md` (and `skills/autonomous-orchestrator/SKILL.md`)
 
 ```diff
 --- a/skills/autonomous-orchestrator/SKILL.md

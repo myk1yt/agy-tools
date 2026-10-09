@@ -2,7 +2,7 @@
 
 > **System**: Antigravity CLI Developer Toolkit (`agy-tools`) & Autonomous Orchestration Ecosystem  
 > **Repository Path**: `D:\OneDrive\Projects\Antigravity-cli`  
-> **Global Configuration**: `C:\Users\k1yt\.gemini` (`~/.gemini`)  
+> **Global Configuration**: `%USERPROFILE%\.gemini` (`~/.gemini`)  
 > **Audit Status**: Complete & Verified (251/251 Tests Passing, Zero External Dependencies)  
 > **Target Audience**: Principal Software Architects, Executive Engineering Leadership (VP / CEO)  
 

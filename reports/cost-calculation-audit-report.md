@@ -197,7 +197,7 @@ Inspected [src/html-report.js](file:///D:/OneDrive/Projects/Antigravity-cli/src/
 
 ## 7. Real-World Live Data Audit Evidence
 
-Audited the live production data in `C:\Users\k1yt\.gemini\antigravity-cli\brain`:
+Audited the live production data in `%USERPROFILE%\.gemini\antigravity-cli\brain` (`~/.gemini/antigravity-cli/brain`):
 
 ```
 Real Sessions Audited:           472 sessions

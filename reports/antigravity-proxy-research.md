@@ -192,7 +192,7 @@ gpt-oss-120b-medium       GPT-OSS 120B (Medium)
 
 ### 3.3 Critical Discovery: Built-In Custom Model Hooks in `agy.exe`
 
-Binary reverse engineering of `C:\Users\k1yt\AppData\Local\agy\bin\agy.exe` revealed built-in hooks that allow pointing `agy.exe` to a custom endpoint:
+Binary reverse engineering of `%USERPROFILE%\AppData\Local\agy\bin\agy.exe` revealed built-in hooks that allow pointing `agy.exe` to a custom endpoint:
 
 1. **Gemini Direct API Mode (`modelProvider: "gemini"`)**:
    - `settings.json` supports `"modelProvider": "gemini"`.
